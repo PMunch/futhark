@@ -393,7 +393,11 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       discard staticExec("mkdir " & fname.parentDir)
       writeFile(fname, defs)
       hint "Running: " & cmd
-      staticExec(cmd)
+      let opirOutput = staticExec(cmd).splitLines
+      for i in 0..<opirOutput.high:
+        echo opirOutput[i]
+      opirOutput[^1]
+
 
   # TODO: Clear out old cache files?
   let

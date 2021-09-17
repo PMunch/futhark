@@ -137,7 +137,7 @@ except Exception as e:
   quit 1
 
 var unit = parseTranslationUnit(index, fname.cstring,
-                              commandLine, args.cint, nil, 0, CXTranslationUnitNone.cuint)
+                              commandLine, args.cint, nil, 0, CXTranslationUnit_DetailedPreprocessingRecord.cuint or CXTranslationUnit_SkipFunctionBodies.cuint)
 deallocCStringArray(commandLine)
 
 var fatal = false
@@ -248,34 +248,62 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
     args.add %*{"name": aname, "type": kind}
   %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv}
 
+proc genMacroDecl(macroDef: CXCursor): JsonNode =
+  let name = $macroDef.getCursorSpelling
+  # Hard to get any usable data from this
+  # TODO: Figure out handling of macros..
+  # Options:
+  # importc, but what should be given as type? Maybe all have to be retyped?
+  # Try to guess type, but has to be able to read macro body (maybe get the range and read C source file directly?)
+  #let extent = macroDef.getCursorExtent()
+  #var
+  #  file: CXFile
+  #  line: cuint
+  #  column: cuint
+  #  offset: cuint
+  #extent.getRangeStart.getExpansionLocation(file.addr, line.addr, column.addr, offset.addr)
+  #echo file.getFileName, ":", line, ":", column, ":", offset
+  return nil
+
 var cursor = getTranslationUnitCursor(unit)
 
 var output = newJArray()
 discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
-  if c.getCursorKind == CXCursor_TypedefDecl:
-    let typedef = c.genTypedefDecl()
-    if typedef != nil:
-      output.add typedef
-  elif c.getCursorKind == CXCursor_StructDecl or c.getCursorKind == CXCursor_UnionDecl:
-    let decl = c.genStructDecl()
-    if decl["fields"].len != 0:
-      output.add decl
-  elif c.getCursorKind == CXCursor_FunctionDecl:
-    output.add c.genProcDecl()
-  elif c.getCursorKind == CXCursor_EnumDecl:
-    output.add c.genEnumDecl()
-  elif c.getCursorKind == CXCursor_VarDecl:
-    output.add c.genVarDecl()
-  else:
-    # Unknown cursor kind
-    stderr.write yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "'"
+  var decl =
+    case c.getCursorKind:
+    of CXCursor_TypedefDecl:
+      c.genTypedefDecl()
+    of CXCursor_StructDecl, CXCursor_UnionDecl:
+      let struct = c.genStructDecl()
+      if struct["fields"].len != 0:
+        struct
+      else: nil
+    of CXCursor_FunctionDecl:
+      c.genProcDecl()
+    of CXCursor_EnumDecl:
+      c.genEnumDecl()
+    of CXCursor_VarDecl:
+      c.genVarDecl()
+    of CXCursor_MacroDefinition:
+      c.genMacroDecl()
+    of CXCursor_MacroExpansion:
+      nil
+    of CXCursor_InclusionDirective:
+      # This could potentially be used to give more context for definitions
+      nil
+    else:
+      # Unknown cursor kind
+      stderr.writeLine yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "'"
+      nil
+  if decl != nil:
+    output.add decl
   return CXChildVisitContinue
 , nil
 )
 
 for elem in output:
   if not (elem.hasKey("kind") and elem.hasKey("file")):
-    stderr.write red "Invalid element: ", elem
+    stderr.writeLine red "Invalid element: ", elem
 echo output
 
 disposeTranslationUnit(unit)
