@@ -299,59 +299,92 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
     else:
       static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
-macro importc*(defs: static[string], includePaths: static[string], files: static[seq[string]], fieldRenames: static[Table[string, Table[string, string]]], typeRenames: static[Table[string, string]], retypes: static[Table[string, Table[string, NimNode]]]): untyped =
-  discard
+converter toStr(x: NimNode): string = x.lisprepr
+
+type
+  FromTo = tuple[f, t: string]
 
 macro importc*(imports: varargs[untyped]): untyped =
-  var
-    nodes = imports
-    defs = ""
-    paths: seq[string]
-    files: seq[string]
-    fullHash: Hash
-    state: State
+  ## Generate code from C imports. String literals will be treated as files to
+  ## `#include`. Paths can be added with `path <string literal>`, which are
+  ## relative to your project folder, `absPath` can be used to supply absolute
+  ## paths. Defines and undefines can be done with `define <name> <value>` and
+  ## `undef <name>` respectively. Arguments for the compiler can be passed with
+  ## `compilerarg <argument>`. To rename a structure or a field within a
+  ## structure you can use `rename <name or name.field> <new name>`. And fields
+  ## can be defined to have a different type with
+  ## `retype <name.field> <new type>`, this is to allow more specific types to
+  ## resolve `ptr`/`UncheckedArray` ambiguity and stricter types for e.g.
+  ## overloading.
+  result = newStmtList()
+  var nodes = imports
   if imports[0].kind == nnkStmtList:
     nodes = imports[0]
+  var
+    defs = newLit("")
+    files = nnkBracket.newTree()
+    cargs = nnkBracket.newTree()
+    renames: seq[FromTo]
+    retypes: seq[FromTo]
   for node in nodes:
     case node.kind:
     of nnkStrLit:
-      defs &= "#include \"" & node.strVal & "\"\n"
-      files.add node.strVal
+      defs = nnkInfix.newTree("&".ident, defs, newLit("#include \"" & node.strVal & "\"\n"))
+      files.add newLit(node.strVal)
     of nnkCallKinds:
       case node[0].strVal.toLower:
       of "define":
-        defs &= "#define " & node[1].strVal & " " & node[2].repr & "\n"
+        defs = nnkInfix.newTree("&".ident, defs, newLit("#define " & node[1].strVal & " " & node[2].repr & "\n"))
       of "undef":
-        defs &= "#undef " & node[1].strVal & " " & node[2].repr & "\n"
+        defs = nnkInfix.newTree("&".ident, defs, newLit("#undef " & node[1].strVal & "\n"))
       of "path":
-        echo node.treeRepr
-        if node[1].kind == nnkStrLit:
-          paths.add "-I" & absolutePath(node[1].strVal, getProjectPath())
-        else:
-          echo expandMacros(node[1]).treeRepr
+        cargs.add superQuote do: "-I" & absolutePath(`node[1]`, getProjectPath())
+      of "abspath":
+        cargs.add superQuote do: "-I" & `node[1]`
+      of "compilerarg":
+        cargs.add node[1]
       of "rename":
-        fullHash = fullHash !& hash(node.repr)
-        if node[1].kind == nnkDotExpr:
-          state.fieldRenames.mgetOrPut(node[1][0].strVal.sanitizeName(true), default(Table[string, string]))[node[1][1].strVal.sanitizeArgName] = node[2].strVal
-        else:
-          typeRenames[node[1].strVal.nimIdentNormalize()] = (name: node[2].strVal, uses: 0)
+        renames.add (f: node[1].repr, t: node[2].repr)
       of "retype":
-        fullHash = fullHash !& hash(node.repr)
         assert node[1].kind == nnkDotExpr, "Retypes must target a field within an object"
-    else: discard
+        retypes.add (f: node[1].repr, t: node[2].repr)
+      else:
+        let toImport = genSym(nskConst)
+        result.add quote do:
+          const `toImport` = `node`
+        defs = quote do: `defs` & ("#include " & `toImport` & "\n")
+        files.add toImport
+    else: error "Unknown argument passed to importc: " & $node.repr
+  result.add quote do: importcImpl(`defs`, `cargs`, `files`, `renames`, `retypes`)
+
+macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], renames, retypes: static[openArray[FromTo]]): untyped =
+  ## Generate code from C header file. A string, `defs`, containing a header
+  ## file with `#include` statements, preprocessor defines and rules, etc. to
+  ## be converted is compiled with `compilerArguments` passed directly to clang.
+  ## All the symbols defined in any of the `files` listed and all their
+  ## dependant types will be declared. To rename a type or field pass a series
+  ## of tuples to `renames`. And to declare a different type for a field in a
+  ## struct pass a series of tuples to `retypes`. See the module documentation
+  ## for the format. This is used by `importc` internally.
+  ##
+  ## See also:
+  ## * `importc(varargs[untyped]) <#importc,varargs[untyped]>`_
   let
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & paths.join(" ") & " " & fname
+    cmd = "opir " & compilerArguments.join(" ") & " " & fname
     opirHash = hash(defs) !& hash(cmd)
-  fullHash = fullHash !& opirHash
-  let
-    futharkCache = cacheDir / "futhark_" & (!$fullHash).toHex & ".nim"
+    fullHash = !$(hash(renames) !& hash(retypes) !& opirHash)
+    futharkCache = cacheDir / "futhark_" & fullHash.toHex & ".nim"
     opirCache = cacheDir / "opir_" & (!$opirHash).toHex & ".json"
+
+  # Check if everything can be skipped and we can simply include our cached results
   if fileExists(futharkCache):
     hint "Using cached Futhark output: " & futharkCache
     return quote do:
       include `futharkCache`
+
+  # Check if we have an old Opir output and the user just specified different post-processing steps
   let output =
     if fileExists(opirCache):
       hint "Using cached Opir output: " & opirCache
@@ -374,10 +407,12 @@ macro importc*(imports: varargs[untyped]): untyped =
   if not fileExists(opirCache):
     writeFile(opirCache, output)
 
-  state.types = newNimNode(nnkTypeSection)
-  state.procs = newStmtList()
-  state.extraTypes = newStmtList()
+  var state = State(
+    types: newNimNode(nnkTypeSection),
+    procs: newStmtList(),
+    extraTypes: newStmtList())
 
+  # Gather symbols from first level of hierarchy
   for node in fut:
     if node.hasKey("name"):
       state.entities[node["name"].str] = node
@@ -389,12 +424,16 @@ macro importc*(imports: varargs[untyped]): untyped =
         else:
           warning "Anonymous global: " & $node
         break
+
+  # Find all imported symbols we need
   var usedLen = 0
   while state.used.len > usedLen:
     usedLen = state.used.len
     for name in state.used:
       if state.entities.hasKey(name):
         state.used.addUsings(state.entities[name])
+
+  # Generate temporary names to allow overriding definitions
   for name in state.used:
     if state.entities.hasKey(name):
       if state.entities[name]["kind"].str != "proc":
@@ -402,10 +441,23 @@ macro importc*(imports: varargs[untyped]): untyped =
         state.typeNameMap[name] = genSym(nskType, sanitizeName(name, true))
     else:
       state.typeNameMap[name] = name.ident
-  for node in nodes:
-    if node.kind in nnkCallKinds and node[0].strVal.toLower == "retype":
-      node[2].forNode(nnkIdent, (x) => state.typeNameMap.getOrDefault(x.strVal, x))
-      state.retypes.mgetOrPut(sanitizeName(node[1][0].strVal, true), default(Table[string, NimNode]))[sanitizeName(node[1][1].strVal, true)] = node[2]
+
+  # Add explicit type name changes
+  for retype in retypes:
+    var newType = parseExpr(retype.t)
+    newType.forNode(nnkIdent, (x) => state.typeNameMap.getOrDefault(x.strVal, x))
+    var fieldName = retype.f.split('.')
+    state.retypes.mgetOrPut(sanitizeName(fieldName[0], true), default(Table[string, NimNode]))[sanitizeName(fieldName[1], true)] = newType
+
+  # Add explicit field renames
+  for rename in renames:
+    let oldName = rename.f.split('.')
+    if oldName.len == 2:
+      state.fieldRenames.mgetOrPut(oldName[0].sanitizeName(true), default(Table[string, string]))[oldName[1].sanitizeArgName] = rename.t
+    else:
+      typeRenames[oldName[0].nimIdentNormalize()] = (name: rename.t, uses: 0)
+
+  # Generate Nim code from Opir output with applicable post-processing
   for elem in state.used:
     if state.entities.hasKey elem:
       let
@@ -425,10 +477,14 @@ macro importc*(imports: varargs[untyped]): untyped =
         createProc(elem, node, state)
       else:
         warning "Unknown node kind: " & $node["kind"]
-    #else:
-    #  echo "Unknown name: ", elem
+      #else:
+      #  echo "Unknown name: ", elem
+
+  # Add non-dependant types and auxilary types
   result = newStmtList()
   result.add state.extraTypes
+
+  # Generate required opaque types
   for o in state.opaqueTypes:
     let
       origIdent = sanitizeName(o, true).ident
@@ -439,33 +495,18 @@ macro importc*(imports: varargs[untyped]): untyped =
           `ident`* = distinct object
       else:
         static: hint("Declaration of " & `o` & " already exists, not redeclaring")
+
+  # Generate conditionals to define inner object types if not previously defined
   for name, defIdent in state.typeDefMap:
     let
       origIdent = sanitizeName(name, true).ident
       nameIdent = state.typeNameMap[name]
-    state.types.add nnkTypeDef.newTree(
-      nameIdent.postfix "*",
-      newEmptyNode(),
-      nnkPar.newTree(
-        nnkWhenStmt.newTree(
-          nnkElifExpr.newTree(
-            nnkCall.newTree(
-              newIdentNode("declared"),
-              origIdent
-            ),
-            nnkStmtList.newTree(
-              origIdent
-            )
-          ),
-          nnkElseExpr.newTree(
-            nnkStmtList.newTree(
-              defIdent
-            )
-          )
-        )
-      )
-    )
+    state.types.add (quote do:
+      type
+        `nameIdent`* = (when declared(`origIdent`): `origIdent` else: `defIdent`))[0]
   result.add state.types
+
+  # Generate conditionals to define objects if not previously defined
   for name, defIdent in state.typeDefMap:
     let origIdent = sanitizeName(name).ident
     if state.entities[name]["kind"].str != "enum":
@@ -475,5 +516,9 @@ macro importc*(imports: varargs[untyped]): untyped =
              `origIdent`* = `defIdent`
         else:
           static: hint("Declaration of " & `name` & " already exists, not redeclaring")
+
+  # Add generated procedures
   result.add state.procs
+
+  # Cache results
   writeFile(futharkCache, result.repr)
