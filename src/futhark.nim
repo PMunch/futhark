@@ -123,6 +123,8 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
   of "enum", "base": discard
   of "array":
     used.addUsings(node["value"])
+  of "var":
+    used.addUsings(node["type"])
   else:
     error("Unknown node in addUsings: " & $node)
 
@@ -169,6 +171,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       var procTy = nnkProcTy.newTree(
         nnkFormalParams.newTree(json["return"].toNimType(state)),
         nnkPragma.newTree(json["callingConvention"].str.ident))
+      if json["variadic"].bval:
+        procTy[^1].add "varargs".ident
       if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias" and not state.entities.hasKey(json["return"]["base"]["value"].str):
         state.opaqueTypes.incl json["return"]["base"]["value"].str
       var i = 0
@@ -211,28 +215,32 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
     let
       value = parseInt(field["value"].str)
       fname = field["name"].str.ident
-    if not values.hasKey(value):
-      values[value] = fname
+    if origName.len == 0:
+      consts.add superQuote do:
+        const `fname`: `baseType` = `newLit(value)`
     else:
-      let oldIdent = values[value]
-      consts.add quote do:
-        const `fname` = `oldIdent`
-  values.sort(system.cmp)
-  for value, name in values:
-    enumTy.add nnkEnumFieldDef.newTree(name, value.newLit)
-  var typedef = parseStmt("""
-  type
-    dummy = enum ## """ & comment & """
-      ## This doesn't work for some reason
-      dummy""")[0][0]
-  typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))))
-  typedef[2] = enumTy
-  state.extraTypes.add quote do:
-    when not declared(`name`):
-      type
-        `name`* {.size: sizeof(`baseType`).} = `enumTy`
-    else:
-      static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+      if not values.hasKey(value):
+        values[value] = fname
+      else:
+        consts.add superQuote do:
+          const `fname` = `values[value]`
+  if origName.len != 0:
+    values.sort(system.cmp)
+    for value, name in values:
+      enumTy.add nnkEnumFieldDef.newTree(name, value.newLit)
+    var typedef = parseStmt("""
+    type
+      dummy = enum ## """ & comment & """
+        ## This doesn't work for some reason
+        dummy""")[0][0]
+    typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))))
+    typedef[2] = enumTy
+    state.extraTypes.add quote do:
+      when not declared(`name`):
+        type
+          `name`* {.size: sizeof(`baseType`).} = `enumTy`
+      else:
+        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
   state.extraTypes.add consts
 
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
@@ -283,7 +291,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
 proc createProc(origName: string, node: JsonNode, state: var State) =
   let nameIdent = sanitizeName(origName).ident
   var def = node.toNimType(state)
-  def[1].add "importc".ident
+  def[1].add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
   def = nnkProcDef.newTree(
     nameIdent.postfix "*",
     newEmptyNode(),
@@ -298,6 +306,27 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
       `def`
     else:
       static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+
+proc createVar(origName: string, node: JsonNode, state: var State) =
+  let
+    nameIdent = sanitizeName(origName).ident
+    typeIdent = node["type"].toNimType(state)
+  if node["pragmas"].len == 0:
+    state.procs.add quote do:
+      when not declared(`nameIdent`):
+        var `nameIdent`: `typeIdent`
+      else:
+        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+  else:
+    var pragmaExpr = nnkPragmaExpr.newTree(nameIdent, nnkPragma.newTree())
+    for pragma in node["pragmas"]:
+      pragmaExpr[^1].add pragma.str.ident
+    state.procs.add quote do:
+      when not declared(`nameIdent`):
+        var `pragmaExpr`: `typeIdent`
+      else:
+        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+
 
 converter toStr(x: NimNode): string = x.lisprepr
 
@@ -426,7 +455,10 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
           state.used.incl node["name"].str
           state.used.addUsings node
         else:
-          warning "Anonymous global: " & $node
+          if node["kind"].str == "enum":
+            createEnum("", node, state, "")
+          else:
+            warning "Anonymous global: " & $node
         break
 
   # Find all imported symbols we need
@@ -440,11 +472,11 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   # Generate temporary names to allow overriding definitions
   for name in state.used:
     if state.entities.hasKey(name):
-      if state.entities[name]["kind"].str != "proc":
+      if state.entities[name]["kind"].str notin ["proc", "var"]:
         state.typeDefMap[name] = genSym(nskType, sanitizeName(name, true))
         state.typeNameMap[name] = genSym(nskType, sanitizeName(name, true))
     else:
-      state.typeNameMap[name] = name.ident
+      state.typeNameMap[name] = sanitizeName(name, true).ident
 
   # Add explicit type name changes
   for retype in retypes:
@@ -479,6 +511,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
         createEnum(node["name"].str, node, state, comment)
       of "proc":
         createProc(elem, node, state)
+      of "var":
+        createVar(elem, node, state)
       else:
         warning "Unknown node kind: " & $node["kind"]
       #else:

@@ -91,11 +91,12 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
   of CXType_FunctionNoProto: %*{"kind": "invalid", "value": "func_noproto?"}
   of CXType_FunctionProto:
+    # TODO: Move to use genProcDecl? Or at least share code
     let retType = ct.getResultType
     var args: seq[JsonNode]
     for i in 0.cuint..<ct.getNumArgTypes.cuint:
       args.add ct.getArgType(i).toNimType
-    %*{"kind": "proc", "return": retType.toNimType, "arguments": args, "callingConvention": ct.getFunctionTypeCallingConv.toNimCallingConv}
+    %*{"kind": "proc", "return": retType.toNimType, "arguments": args, "callingConvention": ct.getFunctionTypeCallingConv.toNimCallingConv, "variadic": (ct.isFunctionTypeVariadic != 0) }
   of CXType_ConstantArray:
     %*{"kind": "array", "size": ct.getNumElements, "value": ct.getElementType.toNimType}
   of CXType_IncompleteArray:
@@ -234,10 +235,13 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
   let name = $funcDecl.getCursorSpelling
   let retType = funcDeclType.getResultType
   let location = getLocation(funcdecl)
-  # TODO: isFunctiontypeVariadic
   var args: seq[JsonNode]
+  var variadic = (funcDeclType.isFunctionTypeVariadic != 0)
   for i in 0.cuint..<funcDeclType.getNumArgTypes.cuint:
     var kind = funcDeclType.getArgType(i).toNimType
+    if kind["kind"].str == "alias" and kind["value"].str == "va_list" and i == funcDeclType.getNumArgTypes.cuint - 1:
+      variadic = true
+      continue
     if kind["kind"].str == "invalid":
       if funcDeclType.getArgType(i).kind == CXType_Elaborated:
         if funcDeclType.getArgType(i).getTypeDeclaration.kind == CXCursor_EnumDecl:
@@ -246,7 +250,7 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
     if aname == "":
       aname = "a" & $i
     args.add %*{"name": aname, "type": kind}
-  %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv}
+  %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv, "variadic": variadic}
 
 proc genMacroDecl(macroDef: CXCursor): JsonNode =
   let name = $macroDef.getCursorSpelling
