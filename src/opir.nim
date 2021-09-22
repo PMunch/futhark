@@ -32,6 +32,8 @@ proc toNimCallingConv(cc: CXCallingConv): string =
   of CXCallingConv_Invalid: "invalidCallingConv"
   of CXCallingConv_Unexposed: "unexposedCallingConv"
 
+proc genStructDecl(struct: CXCursor): JsonNode
+
 proc toNimType(ct: CXType): JsonNode =
   case ct.kind:
   of CXType_Invalid: %*{"kind": "invalid", "value": "invalid?"}
@@ -86,7 +88,15 @@ proc toNimType(ct: CXType): JsonNode =
         newJNull()
     else:
       %*{"kind": "base", "value": base}
-  of CXType_Record: %*{"kind": "invalid", "value": "record?"}
+  of CXType_Record:
+    #echo $ct.getTypedefName
+    #echo $ct.getTypeDeclaration.getCursorSpelling
+    #%*{"kind": "invalid", "value": "record?"}
+    let value = $ct.getTypeDeclaration.getCursorSpelling
+    if value.len != 0:
+      %*{"kind": "alias", "value": value}
+    else:
+      newJNull()
   of CXType_LValueReference, CXType_RValueReference, CXType_ObjCInterface, CXType_ObjCObjectPointer: %*{"kind": "invalid", "value": "???"}
   of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
   of CXType_FunctionNoProto: %*{"kind": "invalid", "value": "func_noproto?"}
@@ -107,6 +117,9 @@ proc toNimType(ct: CXType): JsonNode =
     if value.len != 0:
       %*{"kind": "alias", "value": value}
     else:
+      #if ct.getTypeDeclaration.kind == CXCursor_StructDecl:
+      #  ct.getTypeDeclaration.genStructDecl
+      #else:
       newJNull()
   else: %*{"kind": "invalid", "value": "???"}
 
@@ -186,7 +199,7 @@ proc genStructDecl(struct: CXCursor): JsonNode =
     name = name[len(kind & " ")..^1]
   result =
     if struct.Cursor_isAnonymous != 0:
-      %*{"kind": kind, "fields": []}
+      %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "fields": []}
     else:
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "fields": []}
   discard visitChildren(struct, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =

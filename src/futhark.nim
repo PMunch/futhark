@@ -79,7 +79,7 @@ proc findAlias(kind: JsonNode): string =
   of "alias": kind["value"].str
   of "base": ""
   of "pointer": findAlias(kind["base"])
-  of "array": findAlias(kind["value"])
+  of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
   of "proc": (if kind.hasKey("name"): kind["name"].str else: "")
   else:
@@ -104,11 +104,12 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
         used.incl alias
   of "struct", "union":
     for field in node["fields"]:
-      if field["type"]["kind"].str in ["struct", "union"]:
-        used.addUsings field["type"]
-      let alias = field["type"].findAlias
-      if alias.len != 0:
-        used.incl alias
+      if field["type"].kind != JNull:
+        if field["type"]["kind"].str in ["struct", "union"]:
+          used.addUsings field["type"]
+        let alias = field["type"].findAlias
+        if alias.len != 0:
+          used.incl alias
   of "typedef":
     let alias = node["type"].findAlias
     if alias.len != 0:
@@ -192,6 +193,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       else:
         nnkPtrTy.newTree(nnkBracketExpr.newTree("UncheckedArray".ident, json["value"].toNimType(state)))
     of "alias":
+      if not state.entities.hasKey(json["value"].str):
+        state.opaqueTypes.incl json["value"].str
       state.typeNameMap[json["value"].str]
     of "enum":
       error "Unable to resolve nested enums from here"
@@ -214,7 +217,7 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
   for field in node["fields"]:
     let
       value = parseInt(field["value"].str)
-      fname = field["name"].str.ident
+      fname = sanitizeName(field["name"].str, true).ident
     if origName.len == 0:
       consts.add superQuote do:
         const `fname`: `baseType` = `newLit(value)`
@@ -256,7 +259,17 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     dummy = object
       ## """ & comment)[0][0]
   newType[0] = name
+  var lastFieldType: JsonNode
   for field in node["fields"]:
+    let fieldType =
+      if field["type"].kind == JNull:
+        lastFieldType
+      elif field["type"]["kind"].str == "array" and field["type"]["value"].kind == JNull:
+        var nFieldType = field["type"]
+        nFieldType["value"] = lastFieldType
+        nFieldType
+      else:
+        field["type"]
     if field.hasKey("name"):
       let
         saneFieldName = sanitizeArgName(field["name"].str)
@@ -267,25 +280,34 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
       if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
         newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", state.retypes[saneName][fname])
       else:
-        if field["type"]["kind"].str == "pointer" and field["type"]["base"]["kind"].str == "alias" and not state.entities.hasKey(field["type"]["base"]["value"].str):
-          state.opaqueTypes.incl field["type"]["base"]["value"].str
-        if field["type"]["kind"].str == "enum":
+        if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
+          state.opaqueTypes.incl fieldType["base"]["value"].str
+        if fieldType["kind"].str == "enum":
           let enumName = saneName & "_" & saneFieldName & "_t"
-          createEnum(enumName, field["type"], state, "")
+          createEnum(enumName, fieldType, state, "")
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", enumName.ident)
-        elif field["type"]["kind"].str in ["struct", "union"]:
+        elif fieldType["kind"].str in ["struct", "union"]:
           let
             structName = saneName & "_" & saneFieldName & "_t"
-          createStruct(structName, structName, field["type"], state, "")
+          createStruct(structName, structName, fieldType, state, "")
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
+        elif fieldType["kind"].str == "array" and fieldType["value"]["kind"].str in ["struct", "union"]:
+          let
+            structName = saneName & "_" & saneFieldName & "_t"
+          createStruct(structName, structName, fieldType["value"], state, "")
+          # Kind of a hack, rename the array to a base kind to just have it use the name directly
+          var generated = fieldType
+          generated["value"] = %*{"kind": "base", "value": structName}
+          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", generated.toNimType(state))
         else:
-          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", field["type"].toNimType(state))
+          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", fieldType.toNimType(state))
     else:
-      if field["type"]["kind"].str == "struct":
-        if not state.entities.hasKey(field["type"]["name"].str):
-          state.opaqueTypes.incl field["type"]["name"].str
+      if fieldType["kind"].str == "struct" and fieldType.hasKey("name"):
+        if not state.entities.hasKey(fieldType["name"].str):
+          state.opaqueTypes.incl fieldType["name"].str
       else:
         warning "Unhandled anonymous field: " & $field
+    lastFieldType = fieldType
   state.types.add newType
 
 proc createProc(origName: string, node: JsonNode, state: var State) =
@@ -363,7 +385,10 @@ macro importc*(imports: varargs[untyped]): untyped =
     of nnkCallKinds:
       case node[0].strVal.toLower:
       of "define":
-        defs = nnkInfix.newTree("&".ident, defs, newLit("#define " & node[1].strVal & " " & node[2].repr & "\n"))
+        if node.len == 3:
+          defs = nnkInfix.newTree("&".ident, defs, newLit("#define " & node[1].strVal & " " & node[2].repr & "\n"))
+        else:
+          defs = nnkInfix.newTree("&".ident, defs, newLit("#define " & node[1].strVal & "\n"))
       of "undef":
         defs = nnkInfix.newTree("&".ident, defs, newLit("#undef " & node[1].strVal & "\n"))
       of "path":
@@ -520,6 +545,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Add non-dependant types and auxilary types
   result = newStmtList()
+  result.add quote do:
+    from macros import hint
   result.add state.extraTypes
 
   # Generate required opaque types
