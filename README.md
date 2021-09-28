@@ -120,3 +120,8 @@ it doesn't currently understand macros that simply define constant values. It
 might also mess up on definition types I haven't seen yet in the small handful
 of libraries I've tested it against. All of these things are things I hope to
 get fixed up.
+
+## TODO
+- Proper handling of C macros, at least those with simple values (inherently hard because C macros are typeless)
+- Find way to not require C compiler include paths
+- Verify if/make it work on Windows and Mac
