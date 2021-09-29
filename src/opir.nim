@@ -1,4 +1,4 @@
-import strutils, os, json, posix
+import strutils, os, json, posix, options
 import clang, termstyle
 
 proc `$`(cxstr: CXString): string =
@@ -272,14 +272,47 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
   # Options:
   # importc, but what should be given as type? Maybe all have to be retyped?
   # Try to guess type, but has to be able to read macro body (maybe get the range and read C source file directly?)
-  #let extent = macroDef.getCursorExtent()
-  #var
-  #  file: CXFile
-  #  line: cuint
-  #  column: cuint
-  #  offset: cuint
-  #extent.getRangeStart.getExpansionLocation(file.addr, line.addr, column.addr, offset.addr)
-  #echo file.getFileName, ":", line, ":", column, ":", offset
+  let extent = macroDef.getCursorExtent()
+  var
+    file: CXFile
+    line: cuint
+    column: cuint
+    offset: cuint
+  # Might be more information to be gathered
+  #echo macroDef.getCursorType()
+  #echo macroDef.CursorHasAttrs, ": ", name
+  #echo macroDef.CursorIsMacroFunctionLike, ": ", name
+  extent.getRangeStart.getExpansionLocation(file.addr, line.addr, column.addr, offset.addr)
+  let startOffset = offset
+  extent.getRangeEnd.getExpansionLocation(file.addr, nil, nil, offset.addr)
+  if offset - startOffset != name.len.uint32:
+    if macroDef.CursorIsMacroFunctionLike == 0:
+      let fname = $file.getFileName
+      if fname.len != 0:
+        let def = readFile(fname)[startOffset+name.len.cuint..<offset].strip
+        let value = try:
+            some(parseInt(def))
+          except:
+            try:
+              some(parseHexInt(def))
+            except:
+              # TODO: Implement parsing of simple statements like "10*1024", "(1 << 2)", and "0x07U", along with identifiers
+              if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}):
+                return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": {"kind": "alias", "value": def}}
+              else:
+                none(int)
+        if value.isSome:
+          return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": value.get}
+  # Might be useful to read a function signature for function like macros
+  #for i in 0..<macroDef.getCursorCompletionString.getNumCompletionChunks:
+  #  echo "\t", macroDef.getCursorCompletionString.getCompletionChunkText(i)
+  #  echo "\t", macroDef.getCursorCompletionString.getCompletionChunkKind(i)
+  discard visitChildren(macroDef.getCursorDefinition, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
+    var mainObj = cast[ptr JsonNode](clientData)
+    echo "name: ", field.getCursorSpelling
+    echo "kind: ", field.kind
+    CXChildVisitContinue
+  , result.addr)
   return nil
 
 var cursor = getTranslationUnitCursor(unit)

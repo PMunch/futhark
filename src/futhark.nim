@@ -126,6 +126,9 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
     used.addUsings(node["value"])
   of "var":
     used.addUsings(node["type"])
+  of "const":
+    if node["value"].kind == JObject:
+      used.addUsings(node["value"])
   else:
     error("Unknown node in addUsings: " & $node)
 
@@ -138,6 +141,7 @@ type
     typeDefMap: Table[string, NimNode]
     typeNameMap: Table[string, NimNode]
     used: HashSet[string]
+    knownValues: HashSet[string]
     types: NimNode
     procs: NimNode
     extraTypes: NimNode
@@ -204,7 +208,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       "invalidNestedStruct".ident
     else:
       warning "Unknown: " & $json
-      "pointer".idenT
+      "pointer".ident
 
 proc createEnum(origName: string, node: JsonNode, state: var State, comment: string) =
   let
@@ -220,13 +224,14 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       fname = sanitizeName(field["name"].str, true).ident
     if origName.len == 0:
       consts.add superQuote do:
-        const `fname`: `baseType` = `newLit(value)`
+        const `fname`*: `baseType` = `newLit(value)`
     else:
       if not values.hasKey(value):
         values[value] = fname
       else:
         consts.add superQuote do:
-          const `fname` = `values[value]`
+          const `fname`* = `values[value]`
+    state.knownValues.incl fname.strVal
   if origName.len != 0:
     values.sort(system.cmp)
     for value, name in values:
@@ -336,7 +341,7 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
   if node["pragmas"].len == 0:
     state.procs.add quote do:
       when not declared(`nameIdent`):
-        var `nameIdent`: `typeIdent`
+        var `nameIdent`*: `typeIdent`
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
   else:
@@ -345,10 +350,43 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
       pragmaExpr[^1].add pragma.str.ident
     state.procs.add quote do:
       when not declared(`nameIdent`):
-        var `pragmaExpr`: `typeIdent`
+        var `pragmaExpr`*: `typeIdent`
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
+proc createConst(origName: string, node: JsonNode, state: var State) =
+  let
+    nameIdent = sanitizeName(origName).ident
+    value =
+      if node["value"].kind == JObject and node["value"]["kind"].str == "alias":
+        if state.typeNameMap.hasKey(node["value"]["value"].str):
+          node["value"].toNimType(state)
+        else:
+          node["value"]["value"].str.sanitizeName(true).ident
+      elif node["value"].kind == JInt:
+        newLit(node["value"].num)
+      else:
+        return
+  if node["value"].kind == JObject:
+    if state.typeNameMap.hasKey(node["value"]["value"].str):
+      state.procs.add quote do:
+        when not declared(`nameIdent`):
+          type `nameIdent`* = `value`
+        else:
+          static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+    elif state.knownValues.contains node["value"]["value"].str:
+      state.procs.add quote do:
+        when not declared(`nameIdent`):
+          const `nameIdent`* = `value`
+        else:
+          static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+  else:
+    state.knownValues.incl nameIdent.strVal
+    state.procs.add quote do:
+      when not declared(`nameIdent`):
+        const `nameIdent`* = `value`
+      else:
+        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
 converter toStr(x: NimNode): string = x.lisprepr
 
@@ -496,10 +534,14 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Generate temporary names to allow overriding definitions
   for name in state.used:
+    if name == "IPPROTO_IP":
+      echo name, ": ", state.entities.hasKey(name)
     if state.entities.hasKey(name):
-      if state.entities[name]["kind"].str notin ["proc", "var"]:
+      if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
         state.typeDefMap[name] = genSym(nskType, sanitizeName(name, true))
         state.typeNameMap[name] = genSym(nskType, sanitizeName(name, true))
+      #if state.entities[name]["kind"].str == "const":
+      #  state.typeNameMap[name] = sanitizeName(name, true).ident
     else:
       state.typeNameMap[name] = sanitizeName(name, true).ident
 
@@ -538,6 +580,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
         createProc(elem, node, state)
       of "var":
         createVar(elem, node, state)
+      of "const":
+        createConst(elem, node, state)
       else:
         warning "Unknown node kind: " & $node["kind"]
       #else:
