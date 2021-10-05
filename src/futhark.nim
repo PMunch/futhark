@@ -491,8 +491,9 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   for node in fut:
     if node.hasKey("name"):
       state.entities[node["name"].str] = node
-    if node["kind"].str == "const":
-      state.used.incl node["name"].str
+    # This triggers an error in the example, it needs to be compiled twice for it to work
+    #if node["kind"].str == "const":
+    #  state.used.incl node["name"].str
     for file in files:
       if node["file"].str.endsWith(file):
         if node.hasKey("name"):
