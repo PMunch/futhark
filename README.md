@@ -69,12 +69,18 @@ consecutive `_` in them. Nim also has a set of reserved keywords like `proc`,
 `addr`, and `type` which would be inconvenient to have as names. Because of
 this Futhark will rename these according to some fairly simple rules.
 
-| Name issue       | Nim rename                                      |
-| ---------------- | ----------------------------------------------- |
-| `_` prefix       | `internal` prefix                               |
-| `__` prefix      | `compiler` prefix                               |
-| `__` in name     | All underscores removed                         |
-| Reserved keyword | `_t` postfix for types, `_a` for argument names |
+| Name issue       | Nim rename                                          |
+| ---------------- | --------------------------------------------------- |
+| `_` prefix       | `internal` prefix                                   |
+| `__` prefix      | `compiler` prefix                                   |
+| `__` in name     | All underscores removed                             |
+| Reserved keyword | Append kind to name, `proc`, `const`, `struct` etc. |
+
+Since this, along with Nims style-insensitivity means that some identifiers
+might collide the name will then further have the kind appended, and if it still
+collides it will append the hash of the original identifier. This shouldn't
+happen often in real projects and exists mostly to create a foolproof renaming
+scheme.
 
 If you want to rename an object or a field you can use the `rename` directive.
 Simply put `rename <from>, <to>` along with your other options. `<from>` can be

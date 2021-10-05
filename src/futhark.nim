@@ -1,78 +1,68 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings
 import macroutils except Lit
 
-var
-  # TODO: Rethink this..
-  typeRenames {.compileTime.} = {"addr": (name: "addr_t", uses: 0), "and": (name: "and_t", uses: 0), "as": (name: "as_t", uses: 0), "asm": (name: "asm_t", uses: 0),
-    "bind": (name: "bind_t", uses: 0), "block": (name: "block_t", uses: 0), "break": (name: "break_t", uses: 0),
-    "case": (name: "case_t", uses: 0), "cast": (name: "cast_t", uses: 0), "concept": (name: "concept_t", uses: 0), "const": (name: "const_t", uses: 0), "continue": (name: "continue_t", uses: 0), "converter": (name: "converter_t", uses: 0),
-    "defer": (name: "defer_t", uses: 0), "discard": (name: "discard_t", uses: 0), "distinct": (name: "distinct_t", uses: 0), "div": (name: "div_t", uses: 0), "do": (name: "do_t", uses: 0),
-    "elif": (name: "elif_t", uses: 0), "else": (name: "else_t", uses: 0), "end": (name: "end_t", uses: 0), "enum": (name: "enum_t", uses: 0), "except": (name: "except_t", uses: 0), "export": (name: "export_t", uses: 0),
-    "finally": (name: "finally_t", uses: 0), "for": (name: "for_t", uses: 0), "from": (name: "from_t", uses: 0), "func": (name: "func_t", uses: 0),
-    "if": (name: "if_t", uses: 0), "import": (name: "import_t", uses: 0), "in": (name: "in_t", uses: 0), "include": (name: "include_t", uses: 0), "interface": (name: "interface_t", uses: 0), "is": (name: "is_t", uses: 0), "isnot": (name: "isnot_t", uses: 0), "iterator": (name: "iterator_t", uses: 0),
-    "let": (name: "let_t", uses: 0),
-    "macro": (name: "macro_t", uses: 0), "method": (name: "method_t", uses: 0), "mixin": (name: "mixin_t", uses: 0), "mod": (name: "mod_t", uses: 0),
-    "nil": (name: "nil_t", uses: 0), "not": (name: "not_t", uses: 0), "notin": (name: "notin_t", uses: 0),
-    "object": (name: "object_t", uses: 0), "of": (name: "of_t", uses: 0), "or": (name: "or_t", uses: 0), "out": (name: "out_t", uses: 0),
-    "proc": (name: "proc_t", uses: 0), "ptr": (name: "ptr_t", uses: 0),
-    "raise": (name: "raise_t", uses: 0), "ref": (name: "ref_t", uses: 0), "return": (name: "return_t", uses: 0),
-    "shl": (name: "shl_t", uses: 0), "shr": (name: "shr_t", uses: 0), "static": (name: "static_t", uses: 0),
-    "template": (name: "template_t", uses: 0), "try": (name: "try_t", uses: 0), "tuple": (name: "tuple_t", uses: 0), "type": (name: "type_t", uses: 0),
-    "using": (name: "using_t", uses: 0),
-    "var": (name: "var_t", uses: 0),
-    "when": (name: "when_t", uses: 0), "while": (name: "while_t", uses: 0),
-    "xor": (name: "xor_t", uses: 0),
-    "yield": (name: "yield_t", uses: 0)}.toTable
-  argRenames {.compileTime.} = {"addr": "addra", "and": "anda", "as": "asa", "asm": "asma",
-    "bind": "binda", "block": "blocka", "break": "breaka",
-    "case": "casea", "cast": "casta", "concept": "concepta", "const": "consta", "continue": "continuea", "converter": "convertera",
-    "defer": "defera", "discard": "discarda", "distinct": "distincta", "div": "diva", "do": "doa",
-    "elif": "elifa", "else": "elsea", "end": "enda", "enum": "enuma", "except": "excepta", "export": "exporta",
-    "finally": "finallya", "for": "fora", "from": "froma", "func": "funca",
-    "if": "ifa", "import": "importa", "in": "ina", "include": "includea", "interface": "interfacea", "is": "isa", "isnot": "isnota", "iterator": "iteratora",
-    "let": "leta",
-    "macro": "macroa", "method": "methoda", "mixin": "mixina", "mod": "moda",
-    "nil": "nila", "not": "nota", "notin": "notina",
-    "object": "objecta", "of": "ofa", "or": "ora", "out": "outa",
-    "proc": "proca", "ptr": "ptra",
-    "raise": "raisea", "ref": "refa", "return": "returna",
-    "shl": "shla", "shr": "shra", "static": "statica",
-    "template": "templatea", "try": "trya", "tuple": "tuplea", "type": "typea",
-    "using": "usinga",
-    "var": "vara",
-    "when": "whena", "while": "whilea",
-    "xor": "xora",
-    "yield": "yielda"}.toTable
+const builtins = ["addr", "and", "as", "asm",
+    "bind", "block", "break",
+    "case", "cast", "concept", "const", "continue", "converter",
+    "defer", "discard", "distinct", "div", "do",
+    "elif", "else", "end", "enum", "except", "export",
+    "finally", "for", "from", "func",
+    "if", "import", "in", "include", "interface", "is", "isnot", "iterator",
+    "let",
+    "macro", "method", "mixin", "mod",
+    "nil", "not", "notin",
+    "object", "of", "or", "out",
+    "proc", "ptr",
+    "raise", "ref", "return",
+    "shl", "shr", "static",
+    "template", "try", "tuple", "type",
+    "using",
+    "var",
+    "when", "while",
+    "xor",
+    "yield"]
 
-proc sanitizeName(x: string, checkOnly = false): string {.compileTime.} =
-  result = x
+type
+  State = object
+    entities: OrderedTable[string, JsonNode]
+    opaqueTypes: HashSet[string]
+    retypes: Table[string, Table[string, NimNode]]
+    fieldRenames: Table[string, Table[string, string]]
+    typeDefMap: Table[string, NimNode]
+    typeNameMap: Table[string, NimNode]
+    renamed: Table[string, string]
+    usedNames: HashSet[string]
+    used: HashSet[string]
+    knownValues: HashSet[string]
+    types: NimNode
+    procs: NimNode
+    extraTypes: NimNode
+
+proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, partof = ""): string {.compileTime.} =
+  result = origName
   if result.startsWith("_"):
     if result.startsWith("__"):
       result = "compiler_" & result[2..^1]
     else:
       result = "internal_" & result[1..^1]
   result = result.nimIdentNormalize()
-  if typeRenames.hasKey(result):
-    let orig = result
-    result = typeRenames[result].name
-    if typeRenames[orig].uses != 0:
-      result.add "_" & $typeRenames[orig].uses
-    if not checkOnly:
-      typeRenames[orig].uses.inc
-  else:
-    if not checkOnly:
-      typeRenames[result] = (name: result, uses: 1)
+  var renamed = false
+  if usedNames.contains(result) or result in builtins:
+    result.add kind
+    renamed = true
+  if usedNames.contains(result) or result in builtins:
+    result.add hash(origName).toHex
+    renamed = true
+  if renamed:
+    hint "Renaming \"" & origName & "\" to \"" & result & "\"" & (if partof.len != 0: " in " & partof else: "")
+  usedNames.incl result
 
-proc sanitizeArgName(x: string): string {.compileTime.} =
-  result = x
-  if result.startsWith("_"):
-    if result.startsWith("__"):
-      result = "internal_" & result[2..^1]
-    else:
-      result = "private_" & result[1..^1]
-  result = result.nimIdentNormalize()
-  if argRenames.hasKey(result):
-    result = argRenames[result]
+proc sanitizeName(state: var State, origName: string, kind: string): string {.compileTime.} =
+  result = sanitizeName(state.usedNames, origName, kind)
+  state.renamed[origName] = result
+
+proc sanitizeName(state: var State, x: JsonNode): string {.compileTime.} =
+  state.sanitizeName(x["name"].str, x["kind"].str)
 
 proc findAlias(kind: JsonNode): string =
   case kind["kind"].str:
@@ -127,24 +117,10 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
   of "var":
     used.addUsings(node["type"])
   of "const":
-    if node["value"].kind == JObject:
-      used.addUsings(node["value"])
+    if node["type"]["kind"].str != "unknown":
+      used.addUsings(node["type"])
   else:
     error("Unknown node in addUsings: " & $node)
-
-type
-  State = object
-    entities: OrderedTable[string, JsonNode]
-    opaqueTypes: HashSet[string]
-    retypes: Table[string, Table[string, NimNode]]
-    fieldRenames: Table[string, Table[string, string]]
-    typeDefMap: Table[string, NimNode]
-    typeNameMap: Table[string, NimNode]
-    used: HashSet[string]
-    knownValues: HashSet[string]
-    types: NimNode
-    procs: NimNode
-    extraTypes: NimNode
 
 proc toNimType(json: JsonNode, state: var State): NimNode =
   result = case json["kind"].str:
@@ -180,10 +156,12 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         procTy[^1].add "varargs".ident
       if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias" and not state.entities.hasKey(json["return"]["base"]["value"].str):
         state.opaqueTypes.incl json["return"]["base"]["value"].str
-      var i = 0
+      var
+        i = 0
+        usedFields: HashSet[string]
       for arg in json["arguments"]:
         let
-          aname = if arg.hasKey("name"): sanitizeArgName(arg["name"].str) else: "a" & $i
+          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg") else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
           if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias" and not state.entities.hasKey(arg["type"]["base"]["value"].str):
@@ -221,7 +199,7 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
   for field in node["fields"]:
     let
       value = parseInt(field["value"].str)
-      fname = sanitizeName(field["name"].str, true).ident
+      fname = state.sanitizeName(field["name"].str, "enumval").ident
     if origName.len == 0:
       consts.add superQuote do:
         const `fname`*: `baseType` = `newLit(value)`
@@ -264,7 +242,9 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     dummy = object
       ## """ & comment)[0][0]
   newType[0] = name
-  var lastFieldType: JsonNode
+  var
+    lastFieldType: JsonNode
+    usedFieldNames: HashSet[string]
   for field in node["fields"]:
     let fieldType =
       if field["type"].kind == JNull:
@@ -277,7 +257,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         field["type"]
     if field.hasKey("name"):
       let
-        saneFieldName = sanitizeArgName(field["name"].str)
+        saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", partof = saneName)
         fname =
           if state.fieldRenames.hasKey(saneName):
             state.fieldRenames[saneName].getOrDefault(saneFieldName, saneFieldName)
@@ -316,7 +296,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
   state.types.add newType
 
 proc createProc(origName: string, node: JsonNode, state: var State) =
-  let nameIdent = sanitizeName(origName).ident
+  let nameIdent = state.renamed[origName].ident
   var def = node.toNimType(state)
   def[1].add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
   def = nnkProcDef.newTree(
@@ -336,7 +316,7 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
 
 proc createVar(origName: string, node: JsonNode, state: var State) =
   let
-    nameIdent = sanitizeName(origName).ident
+    nameIdent = state.renamed[origName].ident
     typeIdent = node["type"].toNimType(state)
   if node["pragmas"].len == 0:
     state.procs.add quote do:
@@ -354,37 +334,36 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
-proc createConst(origName: string, node: JsonNode, state: var State) =
+proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
   let
-    nameIdent = sanitizeName(origName).ident
+    nameIdent = state.renamed[origName].ident
     value =
-      if node["value"].kind == JObject and node["value"]["kind"].str == "alias":
-        if state.typeNameMap.hasKey(node["value"]["value"].str):
-          node["value"].toNimType(state)
+      if node["type"]["kind"].str == "alias":
+        if state.typeNameMap.hasKey(node["type"]["value"].str):
+          node["type"].toNimType(state)
         else:
-          node["value"]["value"].str.sanitizeName(true).ident
+          state.renamed[node["type"]["value"].str].ident
+      elif node["type"]["kind"].str == "unknown":
+        if node["value"].kind == JInt:
+          let intNode = newNimNode(nnkIntLit)
+          intNode.intVal = node["value"].num
+          intNode
+        else: return
       elif node["value"].kind == JInt:
-        newLit(node["value"].num)
-      else:
-        return
-  if node["value"].kind == JObject:
-    if state.typeNameMap.hasKey(node["value"]["value"].str):
-      state.procs.add quote do:
-        when not declared(`nameIdent`):
-          type `nameIdent`* = `value`
-        else:
-          static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
-    elif state.knownValues.contains node["value"]["value"].str:
-      state.procs.add quote do:
-        when not declared(`nameIdent`):
-          const `nameIdent`* = `value`
-        else:
-          static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
-  else:
-    state.knownValues.incl nameIdent.strVal
+        nnkCall.newTree(node["type"].toNimType(state), newLit(node["value"].num))
+      else: return
+  if node["type"]["kind"].str == "alias" and value == nameIdent: return
+  let newConst =
+    if node["type"]["kind"].str == "alias" and state.typeNameMap.hasKey(node["type"]["value"].str):
+      parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
+    else:
+      parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
+  if node["type"]["kind"].str != "alias" or (state.typeNameMap.hasKey(node["type"]["value"].str) or state.knownValues.contains node["type"]["value"].str):
+    if node["type"]["kind"].str != "alias":
+      state.knownValues.incl nameIdent.strVal
     state.procs.add quote do:
       when not declared(`nameIdent`):
-        const `nameIdent`* = `value`
+        `newConst`
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
@@ -512,9 +491,13 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   for node in fut:
     if node.hasKey("name"):
       state.entities[node["name"].str] = node
+    if node["kind"].str == "const":
+      state.used.incl node["name"].str
     for file in files:
       if node["file"].str.endsWith(file):
         if node.hasKey("name"):
+          if not state.used.contains node["name"].str:
+            discard state.sanitizeName(node)
           state.used.incl node["name"].str
           state.used.addUsings node
         else:
@@ -534,31 +517,30 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Generate temporary names to allow overriding definitions
   for name in state.used:
-    if name == "IPPROTO_IP":
-      echo name, ": ", state.entities.hasKey(name)
     if state.entities.hasKey(name):
+      let saneName = if state.renamed.hasKey(name): state.renamed[name] else: state.sanitizeName(state.entities[name])
       if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
-        state.typeDefMap[name] = genSym(nskType, sanitizeName(name, true))
-        state.typeNameMap[name] = genSym(nskType, sanitizeName(name, true))
+        state.typeDefMap[name] = genSym(nskType, saneName)
+        state.typeNameMap[name] = genSym(nskType, saneName)
       #if state.entities[name]["kind"].str == "const":
       #  state.typeNameMap[name] = sanitizeName(name, true).ident
     else:
-      state.typeNameMap[name] = sanitizeName(name, true).ident
+      state.typeNameMap[name] = state.sanitizeName(name, "anon").ident
 
   # Add explicit type name changes
   for retype in retypes:
     var newType = parseExpr(retype.t)
     newType.forNode(nnkIdent, (x) => state.typeNameMap.getOrDefault(x.strVal, x))
     var fieldName = retype.f.split('.')
-    state.retypes.mgetOrPut(sanitizeName(fieldName[0], true), default(Table[string, NimNode]))[sanitizeName(fieldName[1], true)] = newType
+    state.retypes.mgetOrPut(state.renamed[fieldName[0]], default(Table[string, NimNode]))[fieldName[1]] = newType
 
   # Add explicit field renames
   for rename in renames:
     let oldName = rename.f.split('.')
     if oldName.len == 2:
-      state.fieldRenames.mgetOrPut(oldName[0].sanitizeName(true), default(Table[string, string]))[oldName[1].sanitizeArgName] = rename.t
+      state.fieldRenames.mgetOrPut(state.renamed[oldName[0]], default(Table[string, string]))[oldName[1]] = rename.t
     else:
-      typeRenames[oldName[0].nimIdentNormalize()] = (name: rename.t, uses: 0)
+      state.renamed[oldname[0]] = rename.t
 
   # Generate Nim code from Opir output with applicable post-processing
   for elem in state.used:
@@ -568,7 +550,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
         comment = "Generated based on " & node["file"].str & ":" & $node["position"]["line"].num & ":" & $node["position"]["column"].num
       case node["kind"].str:
       of "struct", "union":
-        createStruct(node["name"].str, sanitizeName(node["name"].str, true), node, state, comment)
+        createStruct(node["name"].str, state.renamed[node["name"].str], node, state, comment)
       of "typedef":
         var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
         newType[0] = state.typeDefMap[node["name"].str].postfix "*"
@@ -581,7 +563,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       of "var":
         createVar(elem, node, state)
       of "const":
-        createConst(elem, node, state)
+        createConst(elem, node, state, comment)
       else:
         warning "Unknown node kind: " & $node["kind"]
       #else:
@@ -596,7 +578,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   # Generate required opaque types
   for o in state.opaqueTypes:
     let
-      origIdent = sanitizeName(o, true).ident
+      origIdent = state.renamed[o].ident
       ident = state.typeDefMap.getOrDefault(o, origIdent)
     result.add quote do:
       when not declared(`origIdent`):
@@ -608,7 +590,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   # Generate conditionals to define inner object types if not previously defined
   for name, defIdent in state.typeDefMap:
     let
-      origIdent = sanitizeName(name, true).ident
+      origIdent = state.renamed[name].ident
       nameIdent = state.typeNameMap[name]
     state.types.add (quote do:
       type
@@ -617,7 +599,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Generate conditionals to define objects if not previously defined
   for name, defIdent in state.typeDefMap:
-    let origIdent = sanitizeName(name).ident
+    let origIdent = state.renamed[name].ident
     if state.entities[name]["kind"].str != "enum":
       result.add quote do:
         when not declared(`origIdent`):

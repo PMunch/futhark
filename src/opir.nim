@@ -1,4 +1,4 @@
-import strutils, os, json, posix, options
+import strutils, os, json, posix, options, tables
 import clang, termstyle
 
 proc `$`(cxstr: CXString): string =
@@ -265,6 +265,8 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
     args.add %*{"name": aname, "type": kind}
   %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv, "variadic": variadic}
 
+
+var fileCache: Table[string, string] # TODO: Is there some way to get the macro body so we don't have to do this?
 proc genMacroDecl(macroDef: CXCursor): JsonNode =
   let name = $macroDef.getCursorSpelling
   # Hard to get any usable data from this
@@ -289,30 +291,49 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
     if macroDef.CursorIsMacroFunctionLike == 0:
       let fname = $file.getFileName
       if fname.len != 0:
-        let def = readFile(fname)[startOffset+name.len.cuint..<offset].strip
-        let value = try:
-            some(parseInt(def))
-          except:
-            try:
-              some(parseHexInt(def))
-            except:
-              # TODO: Implement parsing of simple statements like "10*1024", "(1 << 2)", and "0x07U", along with identifiers
-              if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}):
-                return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": {"kind": "alias", "value": def}}
-              else:
-                none(int)
-        if value.isSome:
-          return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": value.get}
+        let def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
+        template parseReturn(x, defIn: untyped): untyped =
+          let def = defIn
+          try:
+            var
+              unsigned = false
+              long = false
+              longlong = false
+              size = false
+              pos = def.high
+            while def[pos] in {'u', 'U', 'l', 'L', 'z', 'Z'}:
+              case def[pos]:
+              of 'u', 'U': unsigned = true
+              of 'l', 'L': (if long: longlong = true else: long = true)
+              of 'z', 'Z': size = true
+              else: discard
+              dec pos
+            let
+              value = `parse x`(def[0..pos])
+              kind =
+                if unsigned or long or size:
+                  %*{"kind":"base", "value": ("c" & (if unsigned: "u" else: "") & (if long or size: (if long: (if longlong: "longlong" else: "long") else: "size") else: "int"))}
+                else:
+                  %*{"kind":"unknown"}
+            return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": value, "type": kind}
+          except: discard
+        case def[0]:
+        of '0':
+          if def.len == 1: parseReturn(Int, def)
+          case def[1]:
+          of 'x', 'X': parseReturn(HexInt, def.replace("'", ""))
+          of 'b', 'B': parseReturn(BinInt, def.replace("'", ""))
+          of '1'..'9': parseReturn(OctInt, def[1..^1].replace("'", ""))
+          of 'u', 'U', 'l', 'L', 'z', 'Z': parseReturn(Int, def)
+          else: discard
+        of '-', '1'..'9': parseReturn(Int, def.replace("'", ""))
+        else: discard
+        if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}) and def[0] notin '0'..'9':
+          return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": {"kind": "alias", "value": def}}
   # Might be useful to read a function signature for function like macros
   #for i in 0..<macroDef.getCursorCompletionString.getNumCompletionChunks:
   #  echo "\t", macroDef.getCursorCompletionString.getCompletionChunkText(i)
   #  echo "\t", macroDef.getCursorCompletionString.getCompletionChunkKind(i)
-  discard visitChildren(macroDef.getCursorDefinition, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
-    var mainObj = cast[ptr JsonNode](clientData)
-    echo "name: ", field.getCursorSpelling
-    echo "kind: ", field.kind
-    CXChildVisitContinue
-  , result.addr)
   return nil
 
 var cursor = getTranslationUnitCursor(unit)
