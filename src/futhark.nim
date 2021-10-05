@@ -58,8 +58,11 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
   usedNames.incl result
 
 proc sanitizeName(state: var State, origName: string, kind: string): string {.compileTime.} =
-  result = sanitizeName(state.usedNames, origName, kind)
-  state.renamed[origName] = result
+  if not state.renamed.hasKey(origName):
+    result = sanitizeName(state.usedNames, origName, kind)
+    state.renamed[origName] = result
+  else:
+    result = state.renamed[origName]
 
 proc sanitizeName(state: var State, x: JsonNode): string {.compileTime.} =
   state.sanitizeName(x["name"].str, x["kind"].str)
@@ -268,17 +271,17 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
           state.opaqueTypes.incl fieldType["base"]["value"].str
         if fieldType["kind"].str == "enum":
-          let enumName = saneName & "_" & saneFieldName & "_t"
+          let enumName = saneName & "_" & fname & "_t"
           createEnum(enumName, fieldType, state, "")
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", enumName.ident)
         elif fieldType["kind"].str in ["struct", "union"]:
           let
-            structName = saneName & "_" & saneFieldName & "_t"
+            structName = saneName & "_" & fname & "_t"
           createStruct(structName, structName, fieldType, state, "")
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
         elif fieldType["kind"].str == "array" and fieldType["value"]["kind"].str in ["struct", "union"]:
           let
-            structName = saneName & "_" & saneFieldName & "_t"
+            structName = saneName & "_" & fname & "_t"
           createStruct(structName, structName, fieldType["value"], state, "")
           # Kind of a hack, rename the array to a base kind to just have it use the name directly
           var generated = fieldType
@@ -372,6 +375,8 @@ converter toStr(x: NimNode): string = x.lisprepr
 type
   FromTo = tuple[f, t: string]
 
+const Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
+
 macro importc*(imports: varargs[untyped]): untyped =
   ## Generate code from C imports. String literals will be treated as files to
   ## `#include`. Paths can be added with `path <string literal>`, which are
@@ -415,7 +420,10 @@ macro importc*(imports: varargs[untyped]): untyped =
       of "compilerarg":
         cargs.add node[1]
       of "rename":
-        renames.add (f: node[1].repr, t: node[2].repr)
+        let
+          f = if node[1].kind in Stringable: node[1].strVal else: node[1].repr
+          t = if node[2].kind in Stringable: node[2].strVal else: node[2].repr
+        renames.add (f: f, t: t)
       of "retype":
         assert node[1].kind == nnkDotExpr, "Retypes must target a field within an object"
         retypes.add (f: node[1].repr, t: node[2].repr)
@@ -487,6 +495,14 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     procs: newStmtList(),
     extraTypes: newStmtList())
 
+  # Add explicit field renames
+  for rename in renames:
+    let oldName = rename.f.split('.')
+    if oldName.len == 2:
+      state.fieldRenames.mgetOrPut(state.renamed[oldName[0]], default(Table[string, string]))[oldName[1]] = rename.t
+    else:
+      state.renamed[oldname[0]] = rename.t
+
   # Gather symbols from first level of hierarchy
   for node in fut:
     if node.hasKey("name"):
@@ -534,14 +550,6 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     newType.forNode(nnkIdent, (x) => state.typeNameMap.getOrDefault(x.strVal, x))
     var fieldName = retype.f.split('.')
     state.retypes.mgetOrPut(state.renamed[fieldName[0]], default(Table[string, NimNode]))[fieldName[1]] = newType
-
-  # Add explicit field renames
-  for rename in renames:
-    let oldName = rename.f.split('.')
-    if oldName.len == 2:
-      state.fieldRenames.mgetOrPut(state.renamed[oldName[0]], default(Table[string, string]))[oldName[1]] = rename.t
-    else:
-      state.renamed[oldname[0]] = rename.t
 
   # Generate Nim code from Opir output with applicable post-processing
   for elem in state.used:
