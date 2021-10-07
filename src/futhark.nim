@@ -23,6 +23,7 @@ const builtins = ["addr", "and", "as", "asm",
     "yield"]
 
 type
+  RenameCallback = proc(name: string, kind: string, partof = ""): string
   State = object
     entities: OrderedTable[string, JsonNode]
     opaqueTypes: HashSet[string]
@@ -37,9 +38,12 @@ type
     types: NimNode
     procs: NimNode
     extraTypes: NimNode
+    renameCallback: RenameCallback
 
-proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, partof = ""): string {.compileTime.} =
+proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
   result = origName
+  if not renameCallback.isNil:
+    result = result.renameCallback(kind, partof)
   if result.startsWith("_"):
     if result.startsWith("__"):
       result = "compiler_" & result[2..^1]
@@ -59,7 +63,7 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
 
 proc sanitizeName(state: var State, origName: string, kind: string): string {.compileTime.} =
   if not state.renamed.hasKey(origName):
-    result = sanitizeName(state.usedNames, origName, kind)
+    result = sanitizeName(state.usedNames, origName, kind, state.renameCallback)
     state.renamed[origName] = result
   else:
     result = state.renamed[origName]
@@ -164,7 +168,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         usedFields: HashSet[string]
       for arg in json["arguments"]:
         let
-          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg") else: "a" & $i
+          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg", state.renameCallback) else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
           if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias" and not state.entities.hasKey(arg["type"]["base"]["value"].str):
@@ -260,7 +264,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         field["type"]
     if field.hasKey("name"):
       let
-        saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", partof = saneName)
+        saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName)
         fname =
           if state.fieldRenames.hasKey(saneName):
             state.fieldRenames[saneName].getOrDefault(saneFieldName, saneFieldName)
@@ -399,6 +403,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     cargs = nnkBracket.newTree()
     renames: seq[FromTo]
     retypes: seq[FromTo]
+    renameCallback = newNilLit()
   for node in nodes:
     case node.kind:
     of nnkStrLit:
@@ -427,6 +432,8 @@ macro importc*(imports: varargs[untyped]): untyped =
       of "retype":
         assert node[1].kind == nnkDotExpr, "Retypes must target a field within an object"
         retypes.add (f: node[1].repr, t: node[2].repr)
+      of "renamecallback":
+        renameCallback = node[1]
       else:
         let toImport = genSym(nskConst)
         result.add quote do:
@@ -434,9 +441,9 @@ macro importc*(imports: varargs[untyped]): untyped =
         defs = quote do: `defs` & ("#include " & `toImport` & "\n")
         files.add toImport
     else: error "Unknown argument passed to importc: " & $node.repr
-  result.add quote do: importcImpl(`defs`, `cargs`, `files`, `renames`, `retypes`)
+  result.add quote do: importcImpl(`defs`, `cargs`, `files`, `renames`, `retypes`, RenameCallback(`renameCallback`))
 
-macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], renames, retypes: static[openArray[FromTo]]): untyped =
+macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
   ## be converted is compiled with `compilerArguments` passed directly to clang.
@@ -493,7 +500,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   var state = State(
     types: newNimNode(nnkTypeSection),
     procs: newStmtList(),
-    extraTypes: newStmtList())
+    extraTypes: newStmtList(),
+    renameCallback: renameCallback)
 
   # Add explicit field renames
   for rename in renames:
