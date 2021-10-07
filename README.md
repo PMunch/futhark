@@ -89,6 +89,13 @@ a field in the format `<object>.<field>` both the original C names either as
 two identifiers, or the whole thing as a single string. `<to>` is always a
 single identifier and is the new name.
 
+If you want to implement more complex renaming you can use the `renameCallback`
+directive and pass in a callback function that takes the original name, a
+string denoting what kind of identifier this is, and an optional string
+denoting which object or procedure this identifier occurs in, and which returns
+a new string. This callback will be inserted into the renaming logic and will
+be called on the original C identifier before all the other rules are applied.
+
 ## Redefining types
 C tends to use a lot of void pointers, pointers to characters, and pointers to
 a single element which is supposed to be a collection of said element. In Nim
