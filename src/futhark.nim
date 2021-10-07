@@ -457,12 +457,14 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   ##
   ## See also:
   ## * `importc(varargs[untyped]) <#importc,varargs[untyped]>`_
+
   let
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
     cmd = "opir " & compilerArguments.join(" ") & " " & fname
     opirHash = hash(defs) !& hash(cmd)
-    fullHash = !$(hash(renames) !& hash(retypes) !& opirHash)
+    renameCallbackSym = quote: `renameCallback`
+    fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !& hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash))
     futharkCache = cacheDir / "futhark_" & fullHash.toHex & ".nim"
     opirCache = cacheDir / "opir_" & (!$opirHash).toHex & ".json"
 
