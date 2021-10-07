@@ -236,7 +236,9 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
   let
     name =
       if node["kind"].str == "struct":
-        state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
+        if node.hasKey("packed") and node["packed"].bval == true:
+          nnkPragmaExpr.newTree(state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*", nnkPragma.newTree("packed".ident))
+        else: state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
       else:
         nnkPragmaExpr.newTree(state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*", nnkPragma.newTree("union".ident))
   # This is a bit of a hack, but the only way to get a comment into an object..
