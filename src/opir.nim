@@ -204,19 +204,26 @@ proc genStructDecl(struct: CXCursor): JsonNode =
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "fields": []}
   discard visitChildren(struct, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
     var mainObj = cast[ptr JsonNode](clientData)
-    if field.getCursorType.kind == CXType_Record:
-      if field.getCursorKind == CXCursor_UnionDecl or field.getCursorKind == CXCursor_StructDecl:
-        mainObj[]["fields"].add %*{"type": genStructDecl(field)}
-    elif field.getCursorType.kind == CXType_Enum:
-      mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
-    else:
-      if field.getCursorType.kind == CXType_Elaborated:
-        if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name"):
-          mainObj[]["fields"].elems[^1]["name"] = %($field.getCursorSpelling)
+    if field.getCursorKind in [CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl]:
+      if field.getCursorType.kind == CXType_Record:
+        # TODO: Move this logic into it's own branch
+        if field.getCursorKind == CXCursor_UnionDecl or field.getCursorKind == CXCursor_StructDecl:
+          mainObj[]["fields"].add %*{"type": genStructDecl(field)}
+      elif field.getCursorType.kind == CXType_Enum:
+        mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
+      else:
+        if field.getCursorType.kind == CXType_Elaborated:
+          if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name"):
+            mainObj[]["fields"].elems[^1]["name"] = %($field.getCursorSpelling)
+          else:
+            mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
         else:
           mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
-      else:
-        mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
+    elif field.getCursorKind == CXCursor_PackedAttr:
+      mainObj[]["packed"] = %true
+    else:
+      stderr.writeLine "Unknown element in structure or union: ", field.getCursorKind
+      quit(-1)
 
     return CXChildVisitContinue
   , result.addr)
