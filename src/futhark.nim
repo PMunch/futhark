@@ -458,14 +458,14 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     opirCache = cacheDir / "opir_" & (!$opirHash).toHex & ".json"
 
   # Check if everything can be skipped and we can simply include our cached results
-  if fileExists(futharkCache):
+  if fileExists(futharkCache) and not defined(futharkRebuild):
     hint "Using cached Futhark output: " & futharkCache
     return quote do:
       include `futharkCache`
 
   # Check if we have an old Opir output and the user just specified different post-processing steps
   let output =
-    if fileExists(opirCache):
+    if fileExists(opirCache) and not defined(opirRebuild):
       hint "Using cached Opir output: " & opirCache
       staticRead(opirCache)
     else:
