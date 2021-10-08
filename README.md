@@ -84,26 +84,32 @@ scheme.
 
 If you want to rename an object or a field you can use the `rename` directive.
 Simply put `rename <from>, <to>` along with your other options. `<from>` can be
-either just an object name (after renaming), or a field in the format
-`<object>.<field>`. `<to>` is always a single identifier and is the new name.
+either just an object name (before any other renaming) as a string or ident, or
+a field in the format `<object>.<field>` both the original C names either as
+two identifiers, or the whole thing as a single string. `<to>` is always a
+single identifier and is the new name.
 
 ## Redefining types
 C tends to use a lot of void pointers, pointers to characters, and pointers to
 a single element which is supposed to be a collection of said element. In Nim
 we like to be a bit more strict about our types. For this you can use the
 `retype` directive. It takes the form `retype <object>.<field>, <Nim type>` so
-for example to retype a `some_element* some_field` to an indexable type in Nim
-you can use `retype some_object.some_field, ptr UncheckedArray[some_element]`.
+for example to retype the C array type defined as `some_element* some_field` to
+an indexable type in Nim you can use
+`retype some_object.some_field, ptr UncheckedArray[some_element]`. The names
+for the object and field are both their renamed Nim identifiers. If you need to
+redefine an entire object, instead of just specific fields Futhark also gates
+every type and procedure definiton in simple `when declared(SomeType)`
+statements so that if you want to override a definition you can simply define
+your type before the `importc` macro invocation and Futhark won't override your
+definition. It is up to you however to ensure that this type actually
+matches in size and layout with the original C type.
+
 If a type is not defined in your C headers but is still required for your
 project Futhark will generate a `type SomeType = distinct object` dummy type
 for it. Since most C libraries will pass things by pointer this makes sure that
 a `ptr SomeType` can exist and be passed around without having to know anything
-about `SomeType`. Futhark also gates every type and procedure definiton in
-simple `when declared(SomeType)` statements so that if you want to override a
-definition you can simply define your type before the `importc` macro
-invocation and Futhark won't override your definition but simply use the one
-you specified. It is up to you however to ensure that this type actually
-matches in size and layout with the original C type.
+about `SomeType`.
 
 # But why not use c2nim or nimterop?
 Both c2nim and nimterop have failed me in the past when wrapping headers. This

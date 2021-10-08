@@ -264,8 +264,8 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
       let
         saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", partof = saneName)
         fname =
-          if state.fieldRenames.hasKey(saneName):
-            state.fieldRenames[saneName].getOrDefault(saneFieldName, saneFieldName)
+          if state.fieldRenames.hasKey(origName):
+            state.fieldRenames[origName].getOrDefault(field["name"].str, saneFieldName)
           else: saneFieldName
       if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
         newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", state.retypes[saneName][fname])
@@ -501,7 +501,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   for rename in renames:
     let oldName = rename.f.split('.')
     if oldName.len == 2:
-      state.fieldRenames.mgetOrPut(state.renamed[oldName[0]], default(Table[string, string]))[oldName[1]] = rename.t
+      state.fieldRenames.mgetOrPut(oldName[0], default(Table[string, string]))[oldName[1]] = rename.t
     else:
       state.renamed[oldname[0]] = rename.t
 
@@ -551,7 +551,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     var newType = parseExpr(retype.t)
     newType.forNode(nnkIdent, (x) => state.typeNameMap.getOrDefault(x.strVal, x))
     var fieldName = retype.f.split('.')
-    state.retypes.mgetOrPut(state.renamed[fieldName[0]], default(Table[string, NimNode]))[fieldName[1]] = newType
+    state.retypes.mgetOrPut(fieldName[0].nimIdentNormalize, default(Table[string, NimNode]))[fieldName[1].nimIdentNormalize] = newType
 
   # Generate Nim code from Opir output with applicable post-processing
   for elem in state.used:
