@@ -2,7 +2,7 @@ import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesetti
 import macroutils except Lit
 
 const
-  VERSION = "0.2.2"
+  VERSION = "0.3.0"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
