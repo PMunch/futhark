@@ -1,7 +1,9 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings
 import macroutils except Lit
 
-const builtins = ["addr", "and", "as", "asm",
+const
+  VERSION = "0.2.2"
+  builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
     "defer", "discard", "distinct", "div", "do",
@@ -376,8 +378,6 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
-converter toStr(x: NimNode): string = x.lisprepr
-
 type
   FromTo = tuple[f, t: string]
 
@@ -462,7 +462,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
     cmd = "opir " & compilerArguments.join(" ") & " " & fname
-    opirHash = hash(defs) !& hash(cmd)
+    opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !& hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash))
     futharkCache = cacheDir / "futhark_" & fullHash.toHex & ".nim"
