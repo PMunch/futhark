@@ -193,7 +193,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
 
 proc createEnum(origName: string, node: JsonNode, state: var State, comment: string) =
   let
-    name = origName.ident
+    name = state.sanitizeName(origName, "enum").ident
     baseType = node["base"].toNimType(state)
   var
     enumTy = nnkEnumTy.newTree(newEmptyNode())
