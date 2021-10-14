@@ -540,9 +540,11 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   var usedLen = 0
   while state.used.len > usedLen:
     usedLen = state.used.len
+    var newUsed = initHashSet[string]()
     for name in state.used:
       if state.entities.hasKey(name):
-        state.used.addUsings(state.entities[name])
+        newUsed.addUsings(state.entities[name])
+    state.used.incl newUsed
 
   # Generate temporary names to allow overriding definitions
   for name in state.used:
