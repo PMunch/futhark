@@ -1,4 +1,4 @@
-import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings
+import macros, strutils, os, packedjson, tables, sets, sugar, hashes, std/compilesettings
 import macroutils except Lit
 
 const
@@ -74,22 +74,22 @@ proc sanitizeName(state: var State, origName: string, kind: string): string {.co
     result = state.renamed[origName]
 
 proc sanitizeName(state: var State, x: JsonNode): string {.compileTime.} =
-  state.sanitizeName(x["name"].str, x["kind"].str)
+  state.sanitizeName(x["name"].getStr, x["kind"].getStr)
 
 proc findAlias(kind: JsonNode): string =
-  case kind["kind"].str:
-  of "alias": kind["value"].str
+  case kind["kind"].getStr:
+  of "alias": kind["value"].getStr
   of "base": ""
   of "pointer": findAlias(kind["base"])
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
-  of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
-  of "proc": (if kind.hasKey("name"): kind["name"].str else: "")
+  of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].getStr else: "")
+  of "proc": (if kind.hasKey("name"): kind["name"].getStr else: "")
   else:
     error("Unknown kind in findAlias: " & $kind)
     ""
 
 proc addUsings(used: var HashSet[string], node: JsonNode) =
-  case node["kind"].str:
+  case node["kind"].getStr:
   of "proc":
     let alias = node["return"].findAlias
     if alias.len != 0:
@@ -107,7 +107,7 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
   of "struct", "union":
     for field in node["fields"]:
       if field["type"].kind != JNull:
-        case field["type"]["kind"].str:
+        case field["type"]["kind"].getStr:
         of "struct", "union", "pointer", "proc":
           used.addUsings field["type"]
         let alias = field["type"].findAlias
@@ -122,7 +122,7 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
     let alias = node["base"].findAlias
     if alias.len != 0:
       used.incl alias
-    elif node["base"]["kind"].str == "proc":
+    elif node["base"]["kind"].getStr == "proc":
       used.addUsings(node["base"])
   of "alias":
     used.incl node.findAlias
@@ -132,17 +132,17 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
   of "var":
     used.addUsings(node["type"])
   of "const":
-    if node["type"]["kind"].str != "unknown":
+    if node["type"]["kind"].getStr != "unknown":
       used.addUsings(node["type"])
   else:
     error("Unknown node in addUsings: " & $node)
 
 proc toNimType(json: JsonNode, state: var State): NimNode =
-  result = case json["kind"].str:
-    of "base": json["value"].str.ident
+  result = case json["kind"].getStr:
+    of "base": json["value"].getStr.ident
     of "pointer":
       var node =
-        case json["base"]["kind"].str:
+        case json["base"]["kind"].getStr:
         of "alias", "proc", "base":
           var node = json["base"].toNimType(state)
           if node.strCmp "void":
@@ -150,39 +150,39 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
           node
         else:
           "pointer".ident
-      for i in 0..<json["depth"].num - (if node.strCmp("pointer") or json["base"]["kind"].str == "proc": 1 else: 0):
+      for i in 0..<json["depth"].getInt - (if node.strCmp("pointer") or json["base"]["kind"].getStr == "proc": 1 else: 0):
         node = nnkPtrTy.newTree(node)
       node
     of "proc":
       var procTy = nnkProcTy.newTree(
         nnkFormalParams.newTree(json["return"].toNimType(state)),
-        nnkPragma.newTree(json["callingConvention"].str.ident))
-      if json["variadic"].bval:
+        nnkPragma.newTree(json["callingConvention"].getStr.ident))
+      if json["variadic"].getBool:
         procTy[^1].add "varargs".ident
-      if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias" and not state.entities.hasKey(json["return"]["base"]["value"].str):
-        state.opaqueTypes.incl json["return"]["base"]["value"].str
+      if json["return"]["kind"].getStr == "pointer" and json["return"]["base"]["kind"].getStr == "alias" and not state.entities.hasKey(json["return"]["base"]["value"].getStr):
+        state.opaqueTypes.incl json["return"]["base"]["value"].getStr
       var
         i = 0
         usedFields: HashSet[string]
       for arg in json["arguments"]:
         let
-          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg", state.renameCallback) else: "a" & $i
+          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].getStr, "arg", state.renameCallback) else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
-          if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias" and not state.entities.hasKey(arg["type"]["base"]["value"].str):
-            state.opaqueTypes.incl arg["type"]["base"]["value"].str
+          if arg["type"]["kind"].getStr == "pointer" and arg["type"]["base"]["kind"].getStr == "alias" and not state.entities.hasKey(arg["type"]["base"]["value"].getStr):
+            state.opaqueTypes.incl arg["type"]["base"]["value"].getStr
         procTy[0].add nnkIdentDefs.newTree(aname.ident, atype, newEmptyNode())
         inc i
       procTy
     of "array":
       if json.hasKey("size"):
-        nnkBracketExpr.newTree("array".ident, json["size"].num.newLit, json["value"].toNimType(state))
+        nnkBracketExpr.newTree("array".ident, json["size"].getInt.newLit, json["value"].toNimType(state))
       else:
         nnkPtrTy.newTree(nnkBracketExpr.newTree("UncheckedArray".ident, json["value"].toNimType(state)))
     of "alias":
-      if not state.entities.hasKey(json["value"].str):
-        state.opaqueTypes.incl json["value"].str
-      state.typeNameMap[json["value"].str]
+      if not state.entities.hasKey(json["value"].getStr):
+        state.opaqueTypes.incl json["value"].getStr
+      state.typeNameMap[json["value"].getStr]
     of "enum":
       error "Unable to resolve nested enums from here"
       "invalidNestedEnum".ident
@@ -203,8 +203,8 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
     consts = newStmtList()
   for field in node["fields"]:
     let
-      value = parseInt(field["value"].str)
-      fname = state.sanitizeName(field["name"].str, "enumval").ident
+      value = parseInt(field["value"].getStr)
+      fname = state.sanitizeName(field["name"].getStr, "enumval").ident
     if origName.len == 0:
       consts.add superQuote do:
         const `fname`*: `baseType` = `newLit(value)`
@@ -237,8 +237,8 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
   let
     name =
-      if node["kind"].str == "struct":
-        if node.hasKey("packed") and node["packed"].bval == true:
+      if node["kind"].getStr == "struct":
+        if node.hasKey("packed") and node["packed"].getBool == true:
           nnkPragmaExpr.newTree(state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*", nnkPragma.newTree("packed".ident))
         else: state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
       else:
@@ -256,47 +256,48 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     let fieldType =
       if field["type"].kind == JNull:
         lastFieldType
-      elif field["type"]["kind"].str == "array" and field["type"]["value"].kind == JNull:
-        var nFieldType = field["type"]
-        nFieldType["value"] = lastFieldType
-        nFieldType
+      elif field["type"]["kind"].getStr == "array" and field["type"]["value"].kind == JNull:
+        #var nFieldType = field["type"]
+        #nFieldType["value"] = lastFieldType
+        #nFieldType
+        %*{"kind": "array", "value": lastFieldType, "size": field["type"]["size"]}
       else:
         field["type"]
     if field.hasKey("name"):
       let
-        saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName)
+        saneFieldName = usedFieldNames.sanitizeName(field["name"].getStr, "field", state.renameCallback, partof = saneName)
         fname =
           if state.fieldRenames.hasKey(origName):
-            state.fieldRenames[origName].getOrDefault(field["name"].str, saneFieldName)
+            state.fieldRenames[origName].getOrDefault(field["name"].getStr, saneFieldName)
           else: saneFieldName
       if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
         newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", state.retypes[saneName][fname])
       else:
-        if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
-          state.opaqueTypes.incl fieldType["base"]["value"].str
-        if fieldType["kind"].str == "enum":
+        if fieldType["kind"].getStr == "pointer" and fieldType["base"]["kind"].getStr == "alias" and not state.entities.hasKey(fieldType["base"]["value"].getStr):
+          state.opaqueTypes.incl fieldType["base"]["value"].getStr
+        if fieldType["kind"].getStr == "enum":
           let enumName = saneName & "_" & fname & "_t"
           createEnum(enumName, fieldType, state, "")
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", enumName.ident)
-        elif fieldType["kind"].str in ["struct", "union"]:
+        elif fieldType["kind"].getStr in ["struct", "union"]:
           let
             structName = saneName & "_" & fname & "_t"
           createStruct(structName, structName, fieldType, state, "")
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
-        elif fieldType["kind"].str == "array" and fieldType["value"]["kind"].str in ["struct", "union"]:
+        elif fieldType["kind"].getStr == "array" and fieldType["value"]["kind"].getStr in ["struct", "union"]:
           let
             structName = saneName & "_" & fname & "_t"
           createStruct(structName, structName, fieldType["value"], state, "")
           # Kind of a hack, rename the array to a base kind to just have it use the name directly
-          var generated = fieldType
-          generated["value"] = %*{"kind": "base", "value": structName}
-          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", generated.toNimType(state))
+          #var generated = fieldType
+          #generated["value"] = %*{"kind": "base", "value": structName}
+          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
         else:
           newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", fieldType.toNimType(state))
     else:
-      if fieldType["kind"].str == "struct" and fieldType.hasKey("name"):
-        if not state.entities.hasKey(fieldType["name"].str):
-          state.opaqueTypes.incl fieldType["name"].str
+      if fieldType["kind"].getStr == "struct" and fieldType.hasKey("name"):
+        if not state.entities.hasKey(fieldType["name"].getStr):
+          state.opaqueTypes.incl fieldType["name"].getStr
       else:
         warning "Unhandled anonymous field: " & $field
     lastFieldType = fieldType
@@ -334,7 +335,7 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
   else:
     var pragmaExpr = nnkPragmaExpr.newTree(nameIdent, nnkPragma.newTree())
     for pragma in node["pragmas"]:
-      pragmaExpr[^1].add pragma.str.ident
+      pragmaExpr[^1].add pragma.getStr.ident
     state.procs.add quote do:
       when not declared(`nameIdent`):
         var `pragmaExpr`*: `typeIdent`
@@ -345,28 +346,28 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
   let
     nameIdent = state.renamed[origName].ident
     value =
-      if node["type"]["kind"].str == "alias":
-        if state.typeNameMap.hasKey(node["type"]["value"].str):
+      if node["type"]["kind"].getStr == "alias":
+        if state.typeNameMap.hasKey(node["type"]["value"].getStr):
           node["type"].toNimType(state)
         else:
-          state.renamed[node["type"]["value"].str].ident
-      elif node["type"]["kind"].str == "unknown":
+          state.renamed[node["type"]["value"].getStr].ident
+      elif node["type"]["kind"].getStr == "unknown":
         if node["value"].kind == JInt:
           let intNode = newNimNode(nnkIntLit)
-          intNode.intVal = node["value"].num
+          intNode.intVal = node["value"].getInt
           intNode
         else: return
       elif node["value"].kind == JInt:
-        nnkCall.newTree(node["type"].toNimType(state), newLit(node["value"].num))
+        nnkCall.newTree(node["type"].toNimType(state), newLit(node["value"].getInt))
       else: return
-  if node["type"]["kind"].str == "alias" and value == nameIdent: return
+  if node["type"]["kind"].getStr == "alias" and value == nameIdent: return
   let newConst =
-    if node["type"]["kind"].str == "alias" and state.typeNameMap.hasKey(node["type"]["value"].str):
+    if node["type"]["kind"].getStr == "alias" and state.typeNameMap.hasKey(node["type"]["value"].getStr):
       parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
     else:
       parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
-  if node["type"]["kind"].str != "alias" or (state.typeNameMap.hasKey(node["type"]["value"].str) or state.knownValues.contains node["type"]["value"].str):
-    if node["type"]["kind"].str != "alias":
+  if node["type"]["kind"].getStr != "alias" or (state.typeNameMap.hasKey(node["type"]["value"].getStr) or state.knownValues.contains node["type"]["value"].getStr):
+    if node["type"]["kind"].getStr != "alias":
       state.knownValues.incl nameIdent.strVal
     state.procs.add quote do:
       when not declared(`nameIdent`):
@@ -485,13 +486,20 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   hint "Parsing Opir output"
   # TODO: Clear out old cache files?
-  let
-    fut = try:
-      output.parseJson
-    except JsonParsingError:
-      nil
-  if fut == nil:
+  #let
+  #  fut = try:
+  #    output.parseJson
+  #  except JsonParsingError:
+  #    nil
+  #if fut == nil:
+  #  error "Unable to parse output of opir:\n" & output
+  var fut: JsonTree
+  try:
+    fut = output.parseJson
+  except JsonParsingError:
     error "Unable to parse output of opir:\n" & output
+    quit 1
+
 
   if not fileExists(opirCache):
     writeFile(opirCache, output)
@@ -514,19 +522,19 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   # Gather symbols from first level of hierarchy
   for node in fut:
     if node.hasKey("name"):
-      state.entities[node["name"].str] = node
+      state.entities[node["name"].getStr] = node
     # This triggers an error in the example, it needs to be compiled twice for it to work
-    #if node["kind"].str == "const":
-    #  state.used.incl node["name"].str
+    #if node["kind"].getStr == "const":
+    #  state.used.incl node["name"].getStr
     for file in files:
-      if node["file"].str.endsWith(file):
+      if node["file"].getStr.endsWith(file):
         if node.hasKey("name"):
-          if not state.used.contains node["name"].str:
+          if not state.used.contains node["name"].getStr:
             discard state.sanitizeName(node)
-          state.used.incl node["name"].str
+          state.used.incl node["name"].getStr
           state.used.addUsings node
         else:
-          if node["kind"].str == "enum":
+          if node["kind"].getStr == "enum":
             createEnum("", node, state, "")
           else:
             warning "Anonymous global: " & $node
@@ -546,12 +554,12 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   for name in state.used:
     if state.entities.hasKey(name):
       let saneName = if state.renamed.hasKey(name): state.renamed[name] else: state.sanitizeName(state.entities[name])
-      if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
+      if state.entities[name]["kind"].getStr notin ["proc", "var", "const"]:
         state.typeDefMap[name] = genSym(nskType, saneName)
         state.typeNameMap[name] = genSym(nskType, saneName)
 
-      if state.entities[name]["kind"].str == "typedef":
-        if state.entities[name]["type"]["kind"].str == "base" and state.entities[name]["type"]["value"].str == "void":
+      if state.entities[name]["kind"].getStr == "typedef":
+        if state.entities[name]["type"]["kind"].getStr == "base" and state.entities[name]["type"]["value"].getStr == "void":
           state.typeDefMap[name] = bindSym("void")
           state.typeNameMap[name] = bindSym("void")
     else:
@@ -569,19 +577,19 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     if state.entities.hasKey elem:
       let
         node = state.entities[elem]
-        comment = "Generated based on " & node["file"].str & ":" & $node["position"]["line"].num & ":" & $node["position"]["column"].num
-      case node["kind"].str:
+        comment = "Generated based on " & node["file"].getStr & ":" & $node["position"]["line"].getInt & ":" & $node["position"]["column"].getInt
+      case node["kind"].getStr:
       of "struct", "union":
-        createStruct(node["name"].str, state.renamed[node["name"].str], node, state, comment)
+        createStruct(node["name"].getStr, state.renamed[node["name"].getStr], node, state, comment)
       of "typedef":
         var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
-        newType[0] = state.typeDefMap[node["name"].str].postfix "*"
+        newType[0] = state.typeDefMap[node["name"].getStr].postfix "*"
         newType[^1] = node["type"].toNimType(state)
         if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
           continue
         state.types.add newType
       of "enum":
-        createEnum(node["name"].str, node, state, comment)
+        createEnum(node["name"].getStr, node, state, comment)
       of "proc":
         createProc(elem, node, state)
       of "var":
@@ -626,7 +634,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   for name, defIdent in state.typeDefMap:
     if defIdent.strVal == "void": continue
     let origIdent = state.renamed[name].ident
-    if state.entities[name]["kind"].str != "enum":
+    if state.entities[name]["kind"].getStr != "enum":
       result.add quote do:
         when not declared(`origIdent`):
           type
