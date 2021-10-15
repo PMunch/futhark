@@ -66,7 +66,8 @@ proc toNimType(ct: CXType): JsonNode =
     if info.depth == 1 and info.baseType.kind == CXType_CharS:
       %*{"kind": "base", "value": "cstring"}
     else:
-      %*{"kind": "pointer", "depth": info.depth, "base": info.baseType.toNimType}
+      let baseType = info.baseType.toNimType
+      %*{"kind": "pointer", "depth": info.depth, "base": if baseType.kind != JNull: baseType else: %*{"kind": "base", "value": "void"}}
   of CXType_BlockPointer: %*{"kind": "pointer", "depth": 0}
   of CXType_Typedef:
     let name = $ct.getTypedefName
@@ -99,8 +100,8 @@ proc toNimType(ct: CXType): JsonNode =
       newJNull()
   of CXType_LValueReference, CXType_RValueReference, CXType_ObjCInterface, CXType_ObjCObjectPointer: %*{"kind": "invalid", "value": "???"}
   of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
-  of CXType_FunctionNoProto: %*{"kind": "invalid", "value": "func_noproto?"}
-  of CXType_FunctionProto:
+  #of CXType_FunctionNoProto: %*{"kind": "invalid", "value": "func_noproto?"}
+  of CXType_FunctionProto, CXType_FunctionNoProto:
     # TODO: Move to use genProcDecl? Or at least share code
     let retType = ct.getResultType
     var args: seq[JsonNode]
@@ -174,12 +175,8 @@ if unit.isNil or fatal:
 
 proc genTypedefDecl(typedef: CXCursor): JsonNode =
   let
-    underlying = typedef.getTypeDefDeclUnderlyingType
     name = $typedef.getCursorSpelling
-    theType = if underlying.kind == CXType_Pointer:
-      underlying.getPointerInfo.baseType.toNimType
-    else:
-      underlying.toNimType
+    theType = typedef.getTypeDefDeclUnderlyingType.toNimType
     location = typedef.getLocation
   if theType.kind != JNull and not (theType["kind"].str == "alias" and theType["value"].str == name):
     return %*{"kind": "typedef", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "type": theType}

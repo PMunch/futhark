@@ -2,6 +2,7 @@ import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesetti
 import macroutils except Lit
 
 const
+  Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
   VERSION = "0.3.0"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
@@ -23,6 +24,8 @@ const
     "when", "while",
     "xor",
     "yield"]
+
+template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
 type
   RenameCallback = proc(name: string, kind: string, partof = ""): string
@@ -104,7 +107,8 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
   of "struct", "union":
     for field in node["fields"]:
       if field["type"].kind != JNull:
-        if field["type"]["kind"].str in ["struct", "union"]:
+        case field["type"]["kind"].str:
+        of "struct", "union", "pointer", "proc":
           used.addUsings field["type"]
         let alias = field["type"].findAlias
         if alias.len != 0:
@@ -118,6 +122,8 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
     let alias = node["base"].findAlias
     if alias.len != 0:
       used.incl alias
+    elif node["base"]["kind"].str == "proc":
+      used.addUsings(node["base"])
   of "alias":
     used.incl node.findAlias
   of "enum", "base": discard
@@ -135,28 +141,18 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
   result = case json["kind"].str:
     of "base": json["value"].str.ident
     of "pointer":
-      if json["base"]["kind"].str == "alias":
-        var node = state.typeNameMap[json["base"]["value"].str]
-        for i in 0..<json["depth"].num:
-          node = nnkPtrTy.newTree(node)
-        node
-      elif json["base"]["kind"].str == "proc":
-        var node = json["base"].toNimType(state)
-        for i in 0..<json["depth"].num - 1:
-          node = nnkPtrTy.newTree(node)
-        node
-      elif json["base"]["kind"].str == "base":
-        var node = json["base"].toNimType(state)
-        if node.strVal == "void":
-          node = "pointer".ident
-        for i in 0..<json["depth"].num - (if node.strVal == "pointer": 1 else: 0):
-          node = nnkPtrTy.newTree(node)
-        node
-      else:
-        var node = "pointer".ident
-        for i in 0..<json["depth"].num - 1:
-          node = nnkPtrTy.newTree(node)
-        node
+      var node =
+        case json["base"]["kind"].str:
+        of "alias", "proc", "base":
+          var node = json["base"].toNimType(state)
+          if node.strCmp "void":
+            node = "pointer".ident
+          node
+        else:
+          "pointer".ident
+      for i in 0..<json["depth"].num - (if node.strCmp("pointer") or json["base"]["kind"].str == "proc": 1 else: 0):
+        node = nnkPtrTy.newTree(node)
+      node
     of "proc":
       var procTy = nnkProcTy.newTree(
         nnkFormalParams.newTree(json["return"].toNimType(state)),
@@ -381,8 +377,6 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
 type
   FromTo = tuple[f, t: string]
 
-const Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-
 macro importc*(imports: varargs[untyped]): untyped =
   ## Generate code from C imports. String literals will be treated as files to
   ## `#include`. Paths can be added with `path <string literal>`, which are
@@ -489,6 +483,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       opirOutput[^1]
 
 
+  hint "Parsing Opir output"
   # TODO: Clear out old cache files?
   let
     fut = try:
@@ -501,6 +496,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   if not fileExists(opirCache):
     writeFile(opirCache, output)
 
+  hint "Generating Futhark output"
   var state = State(
     types: newNimNode(nnkTypeSection),
     procs: newStmtList(),
@@ -553,8 +549,11 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
         state.typeDefMap[name] = genSym(nskType, saneName)
         state.typeNameMap[name] = genSym(nskType, saneName)
-      #if state.entities[name]["kind"].str == "const":
-      #  state.typeNameMap[name] = sanitizeName(name, true).ident
+
+      if state.entities[name]["kind"].str == "typedef":
+        if state.entities[name]["type"]["kind"].str == "base" and state.entities[name]["type"]["value"].str == "void":
+          state.typeDefMap[name] = bindSym("void")
+          state.typeNameMap[name] = bindSym("void")
     else:
       state.typeNameMap[name] = state.sanitizeName(name, "anon").ident
 
@@ -578,6 +577,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
         var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
         newType[0] = state.typeDefMap[node["name"].str].postfix "*"
         newType[^1] = node["type"].toNimType(state)
+        if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
+          continue
         state.types.add newType
       of "enum":
         createEnum(node["name"].str, node, state, comment)
@@ -612,6 +613,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Generate conditionals to define inner object types if not previously defined
   for name, defIdent in state.typeDefMap:
+    if defIdent.strVal == "void": continue
     let
       origIdent = state.renamed[name].ident
       nameIdent = state.typeNameMap[name]
@@ -622,6 +624,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Generate conditionals to define objects if not previously defined
   for name, defIdent in state.typeDefMap:
+    if defIdent.strVal == "void": continue
     let origIdent = state.renamed[name].ident
     if state.entities[name]["kind"].str != "enum":
       result.add quote do:
