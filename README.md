@@ -141,15 +141,17 @@ tested it against. All of these things are things I hope to get fixed up.
 
 # Installation
 To install Futhark you first need to have clang installed. On Linux this is as
-simply as just grabbing it from your package manager on Windows you need to
-install [LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-12.0.1)
+simple as just grabbing it from your package manager (e.g. `sudo apt install 
+libclang-dev`).
+On Windows you need to install [LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-12.0.1)
 (you probably want to grab the `LLVM-12.0.1-win64.exe` version). In order to
 link Opir with libclang you need to either copy the `libclang.lib` and
 `libclang.dll` into the Futhark project dir or use `passL` to pass the folder
 that `libclang.lib` lives in to the linker:
 
 ```
-nimble install --passl:-L<path to libclang.lib> futhark
+nimble install --passL:"-L<path to lib directory containing libclang.so file>" futhark
+#e.g.: nimble install --passL:"-L/usr/lib/llvm-6.0/lib" futhark
 ```
 
 If you have OSX build instructions please open an issue and explain the process,
