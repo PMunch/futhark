@@ -402,6 +402,7 @@ macro importc*(imports: varargs[untyped]): untyped =
   var
     defs = newLit("")
     files = nnkBracket.newTree()
+    importDirs = nnkBracket.newTree()
     cargs = nnkBracket.newTree()
     renames: seq[FromTo]
     retypes: seq[FromTo]
@@ -422,8 +423,9 @@ macro importc*(imports: varargs[untyped]): untyped =
         defs = nnkInfix.newTree("&".ident, defs, newLit("#undef " & node[1].strVal & "\n"))
       of "path":
         cargs.add superQuote do: "-I" & absolutePath(`node[1]`, getProjectPath())
-      of "abspath":
-        cargs.add superQuote do: "-I" & `node[1]`
+        importDirs.add superQuote do: absolutePath(`node[1]`, getProjectPath())
+      of "syspath":
+        cargs.add superQuote do: "-I" & absolutePath(`node[1]`, getProjectPath())
       of "compilerarg":
         cargs.add node[1]
       of "rename":
@@ -443,9 +445,9 @@ macro importc*(imports: varargs[untyped]): untyped =
         defs = quote do: `defs` & ("#include " & `toImport` & "\n")
         files.add toImport
     else: error "Unknown argument passed to importc: " & $node.repr
-  result.add quote do: importcImpl(`defs`, `cargs`, `files`, `renames`, `retypes`, RenameCallback(`renameCallback`))
+  result.add quote do: importcImpl(`defs`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`))
 
-macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
+macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
   ## be converted is compiled with `compilerArguments` passed directly to clang.
@@ -467,6 +469,12 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !& hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash))
     futharkCache = cacheDir / "futhark_" & fullHash.toHex & ".nim"
     opirCache = cacheDir / "opir_" & (!$opirHash).toHex & ".json"
+    extraFiles = block:
+      var files: HashSet[string]
+      for dir in importDirs:
+        for file in dir.walkDirRec:
+          files.incl file
+      files
 
   # Check if everything can be skipped and we can simply include our cached results
   if fileExists(futharkCache) and not defined(futharkRebuild):
@@ -519,24 +527,29 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Gather symbols from first level of hierarchy
   for node in fut:
+    let name = if node.hasKey("name"): node["name"].str else: ""
     if node.hasKey("name"):
-      state.entities[node["name"].str] = node
+      state.entities[name] = node
     # This triggers an error in the example, it needs to be compiled twice for it to work
     #if node["kind"].str == "const":
     #  state.used.incl node["name"].str
-    for file in files:
-      if node["file"].str.endsWith(file):
-        if node.hasKey("name"):
-          if not state.used.contains node["name"].str:
-            discard state.sanitizeName(node)
-          state.used.incl node["name"].str
-          state.used.addUsings node
+    var shouldImport = node["file"].str in extraFiles
+    if not shouldImport:
+      for file in files:
+        if node["file"].str.endsWith file:
+          shouldImport = true
+          break
+    if shouldImport:
+      if node.hasKey("name"):
+        if not state.used.contains name:
+          discard state.sanitizeName(node)
+        state.used.incl name
+        state.used.addUsings node
+      else:
+        if node["kind"].str == "enum":
+          createEnum("", node, state, "")
         else:
-          if node["kind"].str == "enum":
-            createEnum("", node, state, "")
-          else:
-            warning "Anonymous global: " & $node
-        break
+          warning "Anonymous global: " & $node
 
   # Find all imported symbols we need
   var usedLen = 0

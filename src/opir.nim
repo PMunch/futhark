@@ -114,9 +114,15 @@ proc toNimType(ct: CXType): JsonNode =
     %*{"kind": "array", "value": ct.getElementType.toNimType}
   of CXType_Vector, CXType_VariableArray, CXType_DependentSizedArray: %*{"kind": "invalid", "value": "array?"}
   of CXType_Elaborated:
-    let value = $ct.getTypeDeclaration.getCursorSpelling
+    let typeDecl = ct.getTypeDeclaration
+    let value = $typeDecl.getCursorSpelling
     if value.len != 0:
-      %*{"kind": "alias", "value": value}
+      #echo "Creating alias with name ", value, " to type ", $ct.getTypeDeclaration.getCursorKind
+      let prefix = case typeDecl.getCursorKind:
+        of CXCursor_StructDecl: "struct_"
+        of CXCursor_UnionDecl: "union_"
+        else: ""
+      %*{"kind": "alias", "value": prefix & value}
     else:
       #if ct.getTypeDeclaration.kind == CXCursor_StructDecl:
       #  ct.getTypeDeclaration.genStructDecl
@@ -193,7 +199,7 @@ proc genStructDecl(struct: CXCursor): JsonNode =
       else:
         "struct"
   if name.startsWith(kind & " "):
-    name = name[len(kind & " ")..^1]
+    name = kind & "_" & name[len(kind & " ")..^1]
   result =
     if struct.Cursor_isAnonymous != 0:
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "fields": []}
@@ -332,6 +338,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
           else: discard
         of '-', '1'..'9': parseReturn(Int, def.replace("'", ""))
         else: discard
+        # TODO; Look at already defined stuff and ensure this is not a type
         if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}) and def[0] notin '0'..'9':
           return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": {"kind": "alias", "value": def}}
   # Might be useful to read a function signature for function like macros
