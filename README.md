@@ -168,15 +168,21 @@ on definition types I haven't seen yet in the small handful of libraries I've
 tested it against. All of these things are things I hope to get fixed up.
 
 # Installation
-To install Futhark you first need to have clang installed. 
-Installing clang on Linux is as simple as just grabbing it from your package 
-manager (e.g. `sudo apt install libclang-dev`).
-To install clang on Windows you need to install [LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-12.0.1)
-(you probably want to grab the `LLVM-12.0.1-win64.exe` version). 
+To install Futhark you first need to have clang installed. Installing clang on
+Linux is as simple as just grabbing it from your package manager (e.g. `sudo
+apt install libclang-dev`). To install clang on Windows you need to install
+[LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-13.0.1) (you
+probably want to grab the `LLVM-13.0.1-win64.exe` version).
 
-In order to link Opir with libclang you need to either copy the `libclang.lib` 
-and `libclang.dll` into the Futhark project dir or use `passL` to pass the folder
-that `libclang.lib` lives in to the linker:
+If you have Clang installed in your system path you can now simply run:
+```
+nimble install futhark
+```
+
+Otherwise you need to tell Opir how to link with libclang. Do this by either
+copying the `libclang.lib` and `libclang.dll` into the Futhark project dir or
+use `passL` to pass the folder that `libclang.lib` (or libclang.so on Linux
+machines) lives in to the linker:
 
 ```
 nimble install --passL:"-L<path to lib directory containing libclang.so file>" futhark
