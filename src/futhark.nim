@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.3.1"
+  VERSION = "0.4.0"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",

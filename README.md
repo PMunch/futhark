@@ -13,7 +13,7 @@ import futhark
 # Tell futhark where to find the C libraries you will compile with, and what
 # header files you wish to import.
 importc:
-  absPath "/usr/lib/clang/12.0.1/include"
+  sysPath "/usr/lib/clang/12.0.1/include"
   path "../stb"
   define STB_IMAGE_IMPLEMENTATION
   "stb_image.h"
@@ -62,6 +62,29 @@ everything that is defined in the headers with Nim friendly types. The macro
 then reads this file and applies any overrides to types and names before it
 generates all the Nim definitions.
 
+## Basic usage
+The three main things you need to know to use Futhark is `sysPath`, `path`, and
+normal imports (the `"stb_image.h"` part in the above example).
+- `sysPath` denotes system paths, these will be passed to Øpir to make sure
+  Clang knows where to find all the definitions.
+- `path` denotes library paths, these will also be passed to Øpir, but anything
+  found in these paths which is used by the files you have in your project will
+  be wrapped by Futhark.
+- Files listed in quotes in the importc are equivalent to `#include "file.h"`
+  in C. Futhark will generate all definitions in these files, and if `file.h`
+  imports more files found in any of the paths passed in by `path` these files
+  will also be imported.
+
+Note: The difference between `sysPath` and `path` is simply about how Futhark
+handles the file. `sysPath` are paths which are fed to Øpir and Clang in order
+to make Clang able to read all the types. `path` are the paths Futhark takes
+into account when generating definitions. This difference exists to make sure
+Futhark doesn't import all kinds of low-level system stuff which is already
+available in Nim. A subpath of `sysPath` can be passed in with `path` without
+trouble. So `sysPath "/usr/include"` followed by `path "/usr/include/X11"` is
+fine and Futhark will only generate code for the explicitly mentioned files,
+and any files it requires from `/usr/include/X11`.
+
 ## Hard names and overrides
 Nim, unlike C, is case and underscore insensitive and doesn't allow you to have
 identifiers starting with `_` or `__`, or identifiers that have more than one
@@ -71,6 +94,8 @@ this Futhark will rename these according to some fairly simple rules.
 
 | Name issue       | Nim rename                                          |
 | ---------------- | --------------------------------------------------- |
+| struct type      | `struct_` prefix                                    |
+| union type       | `union_` prefix                                     |
 | `_` prefix       | `internal` prefix                                   |
 | `__` prefix      | `compiler` prefix                                   |
 | `__` in name     | All underscores removed                             |
@@ -80,7 +105,10 @@ Since this, along with Nims style-insensitivity means that some identifiers
 might collide the name will then further have the kind appended, and if it still
 collides it will append the hash of the original identifier. This shouldn't
 happen often in real projects and exists mostly to create a foolproof renaming
-scheme.
+scheme. Note that struct and union types also get a prefix, this is normally
+resolved automatically by C typedef-ing the `struct struct_name` to
+`struct_name_t`, but in case you need to use a `struct struct_name` type just
+keep in mind that in Nim it will be `struct_struct_name`.
 
 If you want to rename an object or a field you can use the `rename` directive.
 Simply put `rename <from>, <to>` along with your other options. `<from>` can be
