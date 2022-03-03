@@ -357,20 +357,26 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
           intNode
         else: return
       elif node["value"].kind == JInt:
-        nnkCall.newTree(node["type"].toNimType(state), newLit(node["value"].num))
+        nnkCast.newTree(node["type"].toNimType(state), newLit(node["value"].num))
       else: return
-  if node["type"]["kind"].str == "alias" and value == nameIdent: return
-  let newConst =
-    if node["type"]["kind"].str == "alias" and state.typeNameMap.hasKey(node["type"]["value"].str):
-      parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
-    else:
-      parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
-  if node["type"]["kind"].str != "alias" or (state.typeNameMap.hasKey(node["type"]["value"].str) or state.knownValues.contains node["type"]["value"].str):
-    if node["type"]["kind"].str != "alias":
-      state.knownValues.incl nameIdent.strVal
+  let newConstValueStmt = parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
+  if node["type"]["kind"].str == "alias":
+    if value == nameIdent: return
+    let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
+    if (state.typeNameMap.hasKey(node["type"]["value"].str) or state.knownValues.contains node["type"]["value"].str):
+      state.procs.add quote do:
+        when not declared(`nameIdent`):
+          when `value` is typedesc:
+            `newConstTypeStmt`
+          else:
+            `newConstValueStmt`
+        else:
+          static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+  else:
+    state.knownValues.incl nameIdent.strVal
     state.procs.add quote do:
       when not declared(`nameIdent`):
-        `newConst`
+        `newConstValueStmt`
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
