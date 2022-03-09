@@ -252,6 +252,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
   var
     lastFieldType: JsonNode
     usedFieldNames: HashSet[string]
+    anons = 0
   for field in node["fields"]:
     let fieldType =
       if field["type"].kind == JNull:
@@ -262,47 +263,54 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         nFieldType
       else:
         field["type"]
-    if field.hasKey("name"):
-      let
-        saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName)
-        fname =
-          if state.fieldRenames.hasKey(origName):
-            state.fieldRenames[origName].getOrDefault(field["name"].str, saneFieldName)
-          else: saneFieldName
-      if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
-        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", state.retypes[saneName][fname])
+    let (saneFieldName, fname) =
+      if field.hasKey("name"):
+        let
+          saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName)
+          fname =
+            if state.fieldRenames.hasKey(origName):
+              state.fieldRenames[origName].getOrDefault(field["name"].str, saneFieldName)
+            else: saneFieldName
+        (saneFieldName, fname)
       else:
-        if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
-          state.opaqueTypes.incl fieldType["base"]["value"].str
-        if fieldType["kind"].str == "enum":
-          let enumName = saneName & "_" & fname & "_t"
-          createEnum(enumName, fieldType, state, "")
-          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", enumName.ident)
-        elif fieldType["kind"].str in ["struct", "union"]:
-          let
-            structName = saneName & "_" & fname & "_t"
-          createStruct(structName, structName, fieldType, state, "")
-          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
-        elif fieldType["kind"].str == "array" and fieldType["value"]["kind"].str in ["struct", "union"]:
-          let
-            structName = saneName & "_" & fname & "_t"
-          createStruct(structName, structName, fieldType["value"], state, "")
-          # Kind of a hack, rename the array to a base kind to just have it use the name directly
-          var generated = fieldType
-          generated["value"] = %*{"kind": "base", "value": structName}
-          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", generated.toNimType(state))
-        else:
-          newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", fieldType.toNimType(state))
+        let name = usedFieldNames.sanitizeName("anon" & $anons, "field", state.renameCallback, partof = saneName)
+        inc anons
+        (name, name)
+    if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
+      newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", state.retypes[saneName][fname])
     else:
-      if fieldType["kind"].str == "struct" and fieldType.hasKey("name"):
-        if not state.entities.hasKey(fieldType["name"].str):
-          state.opaqueTypes.incl fieldType["name"].str
+      if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
+        state.opaqueTypes.incl fieldType["base"]["value"].str
+      if fieldType["kind"].str == "enum":
+        let enumName = saneName & "_" & fname & "_t"
+        createEnum(enumName, fieldType, state, "")
+        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", enumName.ident)
+      elif fieldType["kind"].str in ["struct", "union"]:
+        let
+          structName = saneName & "_" & fname & "_t"
+        createStruct(structName, structName, fieldType, state, "")
+        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
+      elif fieldType["kind"].str == "array" and fieldType["value"]["kind"].str in ["struct", "union"]:
+        let
+          structName = saneName & "_" & fname & "_t"
+        createStruct(structName, structName, fieldType["value"], state, "")
+        # Kind of a hack, rename the array to a base kind to just have it use the name directly
+        var generated = fieldType
+        generated["value"] = %*{"kind": "base", "value": structName}
+        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", generated.toNimType(state))
       else:
-        warning "Unhandled anonymous field: " & $field
+        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", fieldType.toNimType(state))
+    #else:
+    #  if fieldType["kind"].str in ["struct", "union"] and fieldType.hasKey("name"):
+    #    if not state.entities.hasKey(fieldType["name"].str):
+    #      state.opaqueTypes.incl fieldType["name"].str
+    #  else:
+    #    warning "Unhandled anonymous field: " & $field
     lastFieldType = fieldType
   state.types.add newType
 
 proc createProc(origName: string, node: JsonNode, state: var State) =
+  if node["inlined"].getBool: return
   let nameIdent = state.renamed[origName].ident
   var def = node.toNimType(state)
   def[1].add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
@@ -507,7 +515,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   if fut == nil:
     error "Unable to parse output of opir:\n" & output
 
-  if not fileExists(opirCache):
+  if not fileExists(opirCache) or defined(opirRebuild):
+    hint "Caching Opir output in " & opirCache
     writeFile(opirCache, output)
 
   hint "Generating Futhark output"
@@ -521,9 +530,9 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   for rename in renames:
     let oldName = rename.f.split('.')
     if oldName.len == 2:
-      state.fieldRenames.mgetOrPut(oldName[0], default(Table[string, string]))[oldName[1]] = rename.t
+      state.fieldRenames.mgetOrPut(oldName[0], default(Table[string, string]))[oldName[1]] = rename.t.nimIdentNormalize()
     else:
-      state.renamed[oldname[0]] = rename.t
+      state.renamed[oldname[0]] = rename.t.nimIdentNormalize()
 
   # Gather symbols from first level of hierarchy
   for node in fut:
@@ -657,4 +666,5 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   result.add state.procs
 
   # Cache results
+  hint "Caching Futhark output in " & futharkCache
   writeFile(futharkCache, result.repr)

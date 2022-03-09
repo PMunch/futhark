@@ -17,6 +17,13 @@ proc getLocation(c: CXCursor): tuple[filename: string, line, column: cuint] =
   c.getCursorLocation.getPresumedLocation(filename.addr, result.line.addr, result.column.addr)
   result.filename = $filename
 
+proc getRange(c: CXCursor): tuple[filename: string, line, column: cuint, endline, endcolumn: cuint] =
+  var filename: CXString
+  let ext = c.getCursorExtent
+  ext.getRangeStart.getPresumedLocation(filename.addr, result.line.addr, result.column.addr)
+  ext.getRangeEnd.getPresumedLocation(filename.addr, result.endline.addr, result.endcolumn.addr)
+  result.filename = $filename
+
 proc toNimCallingConv(cc: CXCallingConv): string =
   case cc:
   of CXCallingConv_Default: "noconv"
@@ -273,7 +280,7 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
     if aname == "":
       aname = "a" & $i
     args.add %*{"name": aname, "type": kind}
-  %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv, "variadic": variadic}
+  %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv, "variadic": variadic, "inlined": funcDecl.Cursor_isFunctionInlined() == 1}
 
 
 var fileCache: Table[string, string] # TODO: Is there some way to get the macro body so we don't have to do this?
@@ -375,7 +382,7 @@ discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientDat
       nil
     else:
       # Unknown cursor kind
-      stderr.writeLine yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "'"
+      stderr.writeLine yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "' at original position: ", getLocation(c)
       nil
   if decl != nil:
     output.add decl
