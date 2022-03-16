@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.4.0"
+  VERSION = "0.5.1"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -234,15 +234,23 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
   state.extraTypes.add consts
 
+#macro alignObject*(alignment: static[int], typedef: untyped): untyped =
+#  echo typedef.treeRepr
+#  echo alignment
+#  typedef
+
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
-  let
-    name =
-      if node["kind"].str == "struct":
-        if node.hasKey("packed") and node["packed"].bval == true:
-          nnkPragmaExpr.newTree(state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*", nnkPragma.newTree("packed".ident))
-        else: state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
-      else:
-        nnkPragmaExpr.newTree(state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*", nnkPragma.newTree("union".ident))
+  let name = block:
+    let coreName = state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
+    var pragmas: seq[NimNode]
+    if node["kind"].str == "union":
+      pragmas.add "union".ident
+    if node.hasKey("packed") and node["packed"].bval == true:
+      pragmas.add "packed".ident
+    if pragmas.len > 0:
+      nnkPragmaExpr.newTree(coreName, nnkPragma.newTree(pragmas))
+    else:
+      coreName
   # This is a bit of a hack, but the only way to get a comment into an object..
   var newType = parseStmt("""
   type
@@ -276,20 +284,25 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         let name = usedFieldNames.sanitizeName("anon" & $anons, "field", state.renameCallback, partof = saneName)
         inc anons
         (name, name)
+    let fident =
+      if node.hasKey("alignment"):
+        nnkPragmaExpr.newTree(fname.ident.postfix "*", nnkPragma.newTree(nnkCall.newTree("align".ident, newLit(node["alignment"].num))))
+      else:
+        fname.ident.postfix "*"
     if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
-      newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", state.retypes[saneName][fname])
+      newType[^1][^1].add newIdentDefs(fident, state.retypes[saneName][fname])
     else:
       if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
         state.opaqueTypes.incl fieldType["base"]["value"].str
       if fieldType["kind"].str == "enum":
         let enumName = saneName & "_" & fname & "_t"
         createEnum(enumName, fieldType, state, "")
-        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", enumName.ident)
+        newType[^1][^1].add newIdentDefs(fident, enumName.ident)
       elif fieldType["kind"].str in ["struct", "union"]:
         let
           structName = saneName & "_" & fname & "_t"
         createStruct(structName, structName, fieldType, state, "")
-        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", structName.ident)
+        newType[^1][^1].add newIdentDefs(fident, structName.ident)
       elif fieldType["kind"].str == "array" and fieldType["value"]["kind"].str in ["struct", "union"]:
         let
           structName = saneName & "_" & fname & "_t"
@@ -297,9 +310,9 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         # Kind of a hack, rename the array to a base kind to just have it use the name directly
         var generated = fieldType
         generated["value"] = %*{"kind": "base", "value": structName}
-        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", generated.toNimType(state))
+        newType[^1][^1].add newIdentDefs(fident, generated.toNimType(state))
       else:
-        newType[^1][^1].add newIdentDefs(fname.ident.postfix "*", fieldType.toNimType(state))
+        newType[^1][^1].add newIdentDefs(fident, fieldType.toNimType(state))
     #else:
     #  if fieldType["kind"].str in ["struct", "union"] and fieldType.hasKey("name"):
     #    if not state.entities.hasKey(fieldType["name"].str):

@@ -230,6 +230,8 @@ proc genStructDecl(struct: CXCursor): JsonNode =
         mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
     of CXCursor_PackedAttr:
       mainObj[]["packed"] = %true
+    of CXCursor_AlignedAttr:
+      mainObj[]["alignment"] = %parent.getCursorType.Type_getAlignOf()
     of CXCursor_FirstAttr: discard # This should really be CXCursor_UnexposedAttr, but that's not exported from the module
     else:
       stderr.writeLine "Unknown element in structure or union: ", field.getCursorKind, " ", field.getLocation()
