@@ -128,6 +128,7 @@ proc toNimType(ct: CXType): JsonNode =
       let prefix = case typeDecl.getCursorKind:
         of CXCursor_StructDecl: "struct_"
         of CXCursor_UnionDecl: "union_"
+        of CXCursor_EnumDecl: "enum_"
         else: ""
       %*{"kind": "alias", "value": prefix & value}
     else:
@@ -244,7 +245,7 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   var name = $enumdecl.getCursorType.getTypeSpelling
   let location = getLocation(enumDecl)
   if name.startsWith("enum "):
-    name = name[len("enum ")..^1]
+    name = "enum_" & name[len("enum ")..^1]
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
   if enumdecl.Cursor_isAnonymous == 0:
     result["name"] = %name

@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.5.1"
+  VERSION = "0.6.0"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -233,11 +233,6 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
   state.extraTypes.add consts
-
-#macro alignObject*(alignment: static[int], typedef: untyped): untyped =
-#  echo typedef.treeRepr
-#  echo alignment
-#  typedef
 
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
   let name = block:
