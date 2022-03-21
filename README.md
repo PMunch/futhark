@@ -162,10 +162,11 @@ less work in actually trying to understand C, which means that all this work
 can be spent on quality Nim translation.
 
 # Sounds great, what's the catch?
-Futhark is currently in an alpha state. It currently doesn't support C++, and
-it doesn't understand things like function-style macros. It might also mess up
-on definition types I haven't seen yet in the small handful of libraries I've
-tested it against. All of these things are things I hope to get fixed up.
+Futhark is currently in an alpha state. It currently doesn't support C++, 
+inline fuctions, and it doesn't understand things like function-style macros. 
+It might also mess up on definition types I haven't seen yet in the small 
+handful of libraries I've tested it against. All of these things are things 
+I hope to get fixed up.
 
 # Installation
 To install Futhark you first need to have clang installed. Installing clang on
