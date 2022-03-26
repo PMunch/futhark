@@ -189,6 +189,12 @@ nimble install --passL:"-L<path to lib directory containing libclang.so file>" f
 #e.g.: nimble install --passL:"-L/usr/lib/llvm-6.0/lib" futhark
 ```
 
+For Windows Users: 
+```
+nimble install --passL:"-L(your drive you installed llvm)\(your folder for llvm)\bin\" futhark 
+```
+For windows, the libclang.dll is located in bin. Restarting might help after installing llvm. 
+
 If you have OSX build instructions please open an issue and explain the process,
 even if it is the same as for Linux, just in order to add it as a note.
 
