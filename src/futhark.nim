@@ -126,7 +126,7 @@ proc addUsings(used: var HashSet[string], node: JsonNode) =
       used.addUsings(node["base"])
   of "alias":
     used.incl node.findAlias
-  of "enum", "base": discard
+  of "enum", "base", "special": discard
   of "array":
     used.addUsings(node["value"])
   of "var":
