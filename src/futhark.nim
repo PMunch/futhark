@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.6.0"
+  VERSION = "0.6.1"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -189,6 +189,11 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
     of "struct", "union":
       error "Unable to resolve nested struct/union from here"
       "invalidNestedStruct".ident
+    of "special":
+      nnkBracketExpr.newTree("array".ident, 2.newLit,
+        nnkTupleTy.newTree(
+          newIdentDefs("low".ident, "uint64".ident),
+          newIdentDefs("high".ident, (if json["value"].str == "uint128": "uint64" else: "int64").ident)))
     else:
       warning "Unknown: " & $json
       "pointer".ident
@@ -375,7 +380,9 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
       elif node["value"].kind == JInt:
         nnkCast.newTree(node["type"].toNimType(state), newLit(node["value"].num))
       else: return
-  let newConstValueStmt = parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
+  let
+    newConstValueStmt = parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
+    newLetValueStmt = parseStmt("let " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
   if node["type"]["kind"].str == "alias":
     if value == nameIdent: return
     let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
@@ -385,14 +392,20 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
           when `value` is typedesc:
             `newConstTypeStmt`
           else:
-            `newConstValueStmt`
+            when `value` is static:
+              `newConstValueStmt`
+            else:
+              `newLetValueStmt`
         else:
           static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
   else:
     state.knownValues.incl nameIdent.strVal
     state.procs.add quote do:
       when not declared(`nameIdent`):
-        `newConstValueStmt`
+        when `value` is static:
+          `newConstValueStmt`
+        else:
+          `newLetValueStmt`
       else:
         static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
