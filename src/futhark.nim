@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.6.1"
+  VERSION = "0.6.2"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -79,7 +79,7 @@ proc sanitizeName(state: var State, x: JsonNode): string {.compileTime.} =
 proc findAlias(kind: JsonNode): string =
   case kind["kind"].str:
   of "alias": kind["value"].str
-  of "base": ""
+  of "base", "special": ""
   of "pointer": findAlias(kind["base"])
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
@@ -190,10 +190,9 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       error "Unable to resolve nested struct/union from here"
       "invalidNestedStruct".ident
     of "special":
-      nnkBracketExpr.newTree("array".ident, 2.newLit,
-        nnkTupleTy.newTree(
-          newIdentDefs("low".ident, "uint64".ident),
-          newIdentDefs("high".ident, (if json["value"].str == "uint128": "uint64" else: "int64").ident)))
+      nnkTupleTy.newTree(
+        newIdentDefs("low".ident, "uint64".ident),
+        newIdentDefs("high".ident, (if json["value"].str == "uint128": "uint64" else: "int64").ident))
     else:
       warning "Unknown: " & $json
       "pointer".ident
