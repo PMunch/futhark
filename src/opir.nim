@@ -54,14 +54,14 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_UInt: %*{"kind": "base", "value": "cuint"}
   of CXType_ULong: %*{"kind": "base", "value": "culong"}
   of CXType_ULongLong: %*{"kind": "base", "value": "culonglong"}
-  of CXType_UInt128: %*{"kind": "invalid", "value": "uint128"}
+  of CXType_UInt128: %*{"kind": "special", "value": "uint128"}
   of CXType_Char_S, CXType_SChar: %*{"kind": "base", "value": "cschar"}
   of CXType_WChar: %*{"kind": "base", "value": "Utf16Char"}
   of CXType_Short: %*{"kind": "base", "value": "cshort"}
   of CXType_Int: %*{"kind": "base", "value": "cint"}
   of CXType_Long: %*{"kind": "base", "value": "clong"}
   of CXType_LongLong: %*{"kind": "base", "value": "clonglong"}
-  of CXType_Int128: %*{"kind": "invalid", "value": "int128"}
+  of CXType_Int128: %*{"kind": "special", "value": "int128"}
   of CXType_Float: %*{"kind": "base", "value": "cfloat"}
   of CXType_Double: %*{"kind": "base", "value": "cdouble"}
   of CXType_LongDouble: %*{"kind": "base", "value": "clongdouble"}
