@@ -519,10 +519,19 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       discard staticExec("mkdir " & fname.parentDir)
       writeFile(fname, defs)
       hint "Running: " & cmd
-      let opirOutput = staticExec(cmd).splitLines
-      for i in 0..<opirOutput.high:
-        echo opirOutput[i]
-      opirOutput[^1]
+      let opirRes = gorgeEx(cmd)
+      if opirRes.exitCode != 0:
+        var err = "Opir exited with non-zero exit code " & $opirRes.exitCode
+        # Seems like opir wasn't found (gorgeEx returns -1 exit code on OSError/IOError)
+        if opirRes.output == "" and opirRes.exitCode == -1:
+          err.add ". Are you sure opir is in PATH?"
+        error err
+        "" # error can return
+      else:
+        let opirOutput = opirRes.output.strip(chars=Whitespace).splitLines
+        for i in 0..<opirOutput.high:
+          echo opirOutput[i]
+        opirOutput[^1]
 
 
   hint "Parsing Opir output"

@@ -396,6 +396,9 @@ discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientDat
 for elem in output:
   if not (elem.hasKey("kind") and elem.hasKey("file")):
     stderr.writeLine red "Invalid element: ", elem
+
+stderr.flushFile()
+stdout.flushFile()
 echo output
 
 disposeTranslationUnit(unit)
