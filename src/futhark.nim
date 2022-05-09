@@ -521,12 +521,14 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       hint "Running: " & cmd
       let opirRes = gorgeEx(cmd)
       if opirRes.exitCode != 0:
-        var err = "Opir exited with non-zero exit code " & $opirRes.exitCode
+        var err = "Opir exited with non-zero exit code $1." % $opirRes.exitCode
+        if opirRes.output != "":
+          err.add "\nOpir output: \n" & opirRes.output
         # Seems like opir wasn't found (gorgeEx returns -1 exit code on OSError/IOError)
         if opirRes.output == "" and opirRes.exitCode == -1:
-          err.add ". Are you sure opir is in PATH?"
+          err.add " Are you sure opir is in PATH?"
         error err
-        "" # error can return
+        "" # error is not noreturn
       else:
         let opirOutput = opirRes.output.strip(chars=Whitespace).splitLines
         for i in 0..<opirOutput.high:
