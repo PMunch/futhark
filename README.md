@@ -146,6 +146,17 @@ for it. Since most C libraries will pass things by pointer this makes sure that
 a `ptr SomeType` can exist and be passed around without having to know anything
 about `SomeType`.
 
+## Destructors
+If you are using a C library you will probably want to wrap destructor calls.
+Futhark makes all C objects `{.pure, inheritable.}` which means you can quite easily use somewhat idiomatic Nim to achieve destructors.
+An example usecase from MiniAudio bindings is as follows:
+```nim
+type TAudioEngine = object of maEngine # Creates a new object in this scope, which allows destructors
+
+proc `=destroy`(engine: var TAudioEngine) = # Define a destructor as normal
+  maEngineUninit(engine.addr)
+```
+
 # But why not use c2nim or nimterop?
 Both c2nim and nimterop have failed me in the past when wrapping headers. This
 boils down to how they are built. c2nim tries to read and understand C files
