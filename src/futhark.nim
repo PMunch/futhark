@@ -241,11 +241,15 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
   let name = block:
     let coreName = state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
-    var pragmas = @[ident"pure", ident"inheritable"]
-    if node["kind"].str == "union":
-      pragmas.add "union".ident
+    var pragmas =
+      if node["kind"].str == "union":
+        @[ident"union"]
+      else:
+        @[ident"pure", ident"inheritable"]
+
     if node.hasKey("packed") and node["packed"].bval == true:
       pragmas.add "packed".ident
+
     if pragmas.len > 0:
       nnkPragmaExpr.newTree(coreName, nnkPragma.newTree(pragmas))
     else:
