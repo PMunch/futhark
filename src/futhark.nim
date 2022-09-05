@@ -523,7 +523,12 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       discard staticExec("mkdir " & fname.parentDir)
       writeFile(fname, defs)
       hint "Running: " & cmd
-      let opirRes = gorgeEx(cmd)
+      let opirRes = gorgeEx(
+        when defined(windows):
+          # Required for gorgeEx() to "act" like cmd.exe
+          "cmd /c " & cmd
+        else:
+          cmd)
       if opirRes.exitCode != 0:
         var err = "Opir exited with non-zero exit code $1." % $opirRes.exitCode
         if opirRes.output != "":
