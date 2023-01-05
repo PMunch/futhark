@@ -256,12 +256,14 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   , result.addr)
 
 proc genVarDecl(vardecl: CXCursor): JsonNode =
-  var pragmas: seq[string]
   let location = getLocation(vardecl)
-  if varDecl.getCursorLinkage == CXLinkage_External:
-    # TODO: This is C `extern`, convert to something in Nim
-    discard
-  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": $varDecl.getCursorSpelling, "pragmas": pragmas, "type": varDecl.getCursorType.toNimType}
+  let linkage = case varDecl.getCursorLinkage:
+    of CXLinkage_Invalid: "invalid"
+    of CXLinkage_NoLinkage: "static"
+    of CXLinkage_Internal: "internal"
+    of CXLinkage_UniqueExternal: "unique"
+    of CXLinkage_External: "external" # This is C `extern`
+  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": $varDecl.getCursorSpelling, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
 
 proc genProcDecl(funcDecl: CXCursor): JsonNode =
   let funcDeclType = funcDecl.getCursorType
