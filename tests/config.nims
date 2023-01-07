@@ -1,23 +1,14 @@
 switch("define", "opirRebuild")
 switch("define", "futharkRebuild")
 
-import strutils
-
-proc getClangPath(): string =
-  var sysPaths: seq[string]
-  for line in staticExec("clang -x c -v -E /dev/null").split("\n"):
-    if line.startsWith(" /"):
-      sysPaths.add(line.substr(1))
-      break
-  if sysPaths.len > 0:
-    sysPaths[0]
+proc getClangIncludePath(): string =
+  const inclDir = staticExec("clang -print-resource-dir") & "/include"
+  when dirExists(inclDir):
+    inclDir
   else:
+    {.warning: "futhark: clang include path not found".}
     ""
 
-var clangPath = getClangPath()
+const clangIncludePath = getClangIncludePath()
 
-if clangPath == "":
-  echo "clang include path not found"
-
-switch("define", "sysPaths:" & clangPath)
-
+switch("define", "sysPaths:" & clangIncludePath)
