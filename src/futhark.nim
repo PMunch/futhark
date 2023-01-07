@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.7.2"
+  VERSION = "0.7.3"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -417,6 +417,16 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
 type
   FromTo = tuple[f, t: string]
 
+proc getClangIncludePath*(): string =
+  ## This tries to get the Clang include path used as `sysPath`. It requires
+  ## Clang to be in your path, but should otherwise work well.
+  const inclDir = staticExec("clang -print-resource-dir") / "include"
+  when dirExists(inclDir):
+    inclDir
+  else:
+    {.warning: "futhark: clang include path not found".}
+    ""
+
 macro importc*(imports: varargs[untyped]): untyped =
   ## Generate code from C imports. String literals will be treated as files to
   ## `#include`. Paths can be added with `path <string literal>`, which are
@@ -441,6 +451,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     renames: seq[FromTo]
     retypes: seq[FromTo]
     renameCallback = newNilLit()
+    sysPathDefined = false
   for node in nodes:
     case node.kind:
     of nnkStrLit:
@@ -460,6 +471,7 @@ macro importc*(imports: varargs[untyped]): untyped =
         importDirs.add superQuote do: absolutePath(`node[1]`, getProjectPath())
       of "syspath":
         cargs.add superQuote do: "-I" & absolutePath(`node[1]`, getProjectPath())
+        sysPathDefined = true
       of "compilerarg":
         cargs.add node[1]
       of "rename":
@@ -480,7 +492,11 @@ macro importc*(imports: varargs[untyped]): untyped =
         files.add toImport
     else: error "Unknown argument passed to importc: " & $node.repr
   for path in syspaths.split(":"):
-    cargs.add superQuote do: "-I" & absolutePath(`path`, getProjectPath())
+    if path != "":
+      cargs.add superQuote do: "-I" & absolutePath(`path`, getProjectPath())
+      sysPathDefined = true
+  if not sysPathDefined:
+    cargs.add superQuote do: "-I" & getClangIncludePath()
   result.add quote do: importcImpl(`defs`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`))
 
 macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
