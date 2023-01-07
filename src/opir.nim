@@ -313,7 +313,10 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
     if macroDef.CursorIsMacroFunctionLike == 0:
       let fname = $file.getFileName
       if fname.len != 0:
-        let def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
+        let def = block:
+          let def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
+          if def[0] == '(' and def[^1] == ')': def[1..^2].strip
+          else: def
         template parseReturn(x, defIn: untyped): untyped =
           let def = defIn
           try:
