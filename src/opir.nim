@@ -315,7 +315,9 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
       if fname.len != 0:
         let def = block:
           let def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
-          if def[0] == '(' and def[^1] == ')': def[1..^2].strip
+          if def.len > 1:
+            if def[0] == '(' and def[^1] == ')': def[1..^2].strip
+            else: def
           else: def
         template parseReturn(x, defIn: untyped): untyped =
           let def = defIn
@@ -342,6 +344,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
                   %*{"kind":"unknown"}
             return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": value, "type": kind}
           except: discard
+        if def.len == 0: return nil
         case def[0]:
         of '0':
           if def.len == 1: parseReturn(Int, def)
