@@ -349,21 +349,16 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
   let
     nameIdent = state.renamed[origName].ident
     typeIdent = node["type"].toNimType(state)
-  if node["pragmas"].len == 0:
-    state.procs.add quote do:
-      when not declared(`nameIdent`):
-        var `nameIdent`*: `typeIdent`
-      else:
-        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
-  else:
-    var pragmaExpr = nnkPragmaExpr.newTree(nameIdent, nnkPragma.newTree())
-    for pragma in node["pragmas"]:
-      pragmaExpr[^1].add pragma.str.ident
-    state.procs.add quote do:
-      when not declared(`nameIdent`):
-        var `pragmaExpr`*: `typeIdent`
-      else:
-        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+    linkage = node["linkage"].str
+  let pragmas: NimNode = case linkage:
+    of "external": nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(origName)))
+    else: Empty()
+  let pragmaExpr = nnkPragmaExpr.newTree(nameIdent.postfix "*", pragmas)
+  state.procs.add quote do:
+    when not declared(`nameIdent`):
+      var `pragmaExpr`: `typeIdent`
+    else:
+      static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
 
 proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
   let
