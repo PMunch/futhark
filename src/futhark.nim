@@ -213,7 +213,7 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
     if origName.len == 0:
       consts.add superQuote do:
         when not declared(`fname`):
-          const `fname`*: `baseType` = `name`.`newLit(value)`
+          const `fname`*: `baseType` = `newLit(value)`
         else:
           static: hint("Declaration of " & `fname.strVal` & " already exists, not redeclaring")
     else:
