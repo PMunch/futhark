@@ -25,8 +25,8 @@ const
     "xor",
     "yield"]
   syspaths {.strdefine.} = ""
-  norenames = defined(norenames)
-  nodeclguards = defined(nodeclguards) or norenames
+  nodeclguards = defined(nodeclguards)
+  noopaquetypes = defined(noopaquetypes)
   exportall = defined(exportall) or nodeclguards
   opirRebuild = defined(opirRebuild)
   futharkRebuild = defined(futharkRebuild) or opirRebuild
@@ -620,8 +620,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     if state.entities.hasKey(name):
       let saneName = if state.renamed.hasKey(name): state.renamed[name] else: state.sanitizeName(state.entities[name])
       if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
-        state.typeDefMap[name] = when norenames: newIdentNode(saneName) else: genSym(nskType, saneName)
-        state.typeNameMap[name] = when norenames: newIdentNode(saneName) else:  genSym(nskType, saneName)
+        state.typeDefMap[name] = when nodeclguards: newIdentNode(saneName) else: genSym(nskType, saneName)
+        state.typeNameMap[name] = when nodeclguards: newIdentNode(saneName) else:  genSym(nskType, saneName)
 
       if state.entities[name]["kind"].str == "typedef":
         if state.entities[name]["type"]["kind"].str == "base" and state.entities[name]["type"]["value"].str == "void":
@@ -673,16 +673,17 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       from macros import hint
   result.add state.extraTypes
 
-  # Generate required opaque types
-  for o in state.opaqueTypes:
-    let
-      origIdent = state.renamed[o].ident
-      ident = state.typeDefMap.getOrDefault(o, origIdent)
-    result.add origIdent.declGuard(quote do:
-      type
-        `ident`* = distinct object)
+  when not noopaquetypes:
+    # Generate required opaque types
+    for o in state.opaqueTypes:
+      let
+        origIdent = state.renamed[o].ident
+        ident = state.typeDefMap.getOrDefault(o, origIdent)
+      result.add origIdent.declGuard(quote do:
+        type
+          `ident`* = distinct object)
 
-  when not norenames:
+  when not nodeclguards:
     # Generate conditionals to define inner object types if not previously defined
     for name, defIdent in state.typeDefMap:
       if defIdent.strVal == "void": continue

@@ -102,12 +102,12 @@ this Futhark will rename these according to some fairly simple rules.
 | `__` in name     | All underscores removed                             |
 | Reserved keyword | Append kind to name, `proc`, `const`, `struct` etc. |
 
-Since this, along with Nims style-insensitivity means that some identifiers
-might collide the name will then further have the kind appended, and if it still
-collides it will append the hash of the original identifier. This shouldn't
-happen often in real projects and exists mostly to create a foolproof renaming
-scheme. Note that struct and union types also get a prefix, this is normally
-resolved automatically by C typedef-ing the `struct struct_name` to
+Since this, along with Nims style-insensitivity, means that some identifiers
+might still collide, the name will further have the kind appended, and if it
+still collides it will append the hash of the original identifier. This
+shouldn't happen often in real projects and exists mostly to create a foolproof
+renaming scheme. Note that struct and union types also get a prefix, this is
+normally resolved automatically by C typedef-ing the `struct struct_name` to
 `struct_name_t`, but in case you need to use a `struct struct_name` type just
 keep in mind that in Nim it will be `struct_struct_name`.
 
@@ -133,19 +133,62 @@ we like to be a bit more strict about our types. For this you can use the
 for example to retype the C array type defined as `some_element* some_field` to
 an indexable type in Nim you can use
 `retype some_object.some_field, ptr UncheckedArray[some_element]`. The names
-for the object and field are both their renamed Nim identifiers. If you need to
-redefine an entire object, instead of just specific fields Futhark also gates
-every type and procedure definiton in simple `when declared(SomeType)`
-statements so that if you want to override a definition you can simply define
-your type before the `importc` macro invocation and Futhark won't override your
-definition. It is up to you however to ensure that this type actually
-matches in size and layout with the original C type.
+for the object and field are both their renamed Nim identifiers.
 
-If a type is not defined in your C headers but is still required for your
-project Futhark will generate a `type SomeType = distinct object` dummy type
-for it. Since most C libraries will pass things by pointer this makes sure that
-a `ptr SomeType` can exist and be passed around without having to know anything
-about `SomeType`.
+If you need to redefine an entire object, instead of just specific fields
+Futhark by default also guards every type and procedure definiton in simple
+`when declared(SomeType)` statements so that if you want to override a
+definition you can simply define your type before the `importc` macro
+invocation and Futhark won't override your definition. It is up to you however
+to ensure that this type actually matches in size and layout with the original
+C type.
+
+## Compatibility features and readability
+Futhark by default tries to ensure the highest amount of compatibility with
+pre-wrapped libraries (e.g. the `posix` standard library module) and other user
+code. Because of this the output which Futhark generates isn't very easy to
+read, being littered with `when defined` statements and weird numbered
+identifiers for renaming things. These features are intended to make Futhark
+easier to use in a mostly automatic fashion, but you might not need them. If
+you want to read the generated output, build documentation of a Futhark
+generated module, or possibly get an improved editor experience you might want
+to disable some of these features.
+
+There are basically three things you can control with define switches:
+
+| Define        | Effect                                                      |
+| ------------- | ----------------------------------------------------------- |
+| nodeclguards  | Disables the object rename/override functionality           |
+| noopaquetypes | Disables opaque types used for unknown objects              |
+| exportall     | Exports all fields (including renamed ones)                 |
+
+### Object rename/override functionality
+This declares types in such a way that earlier declarations by the same name
+will not be overriden or collide. With this feature you can declare an object,
+function, enum, etc. before the call to Futhark and these declarations will be
+used instead of the auto-generated ones. This is also what enables the feature
+at the end of the "Redifining types" section. Disabling this feature will
+remove all of the `when declared` but you might run into Futhark trying to
+redeclare existing things, including built in types and names.
+
+### Opaque type functionality
+If a type is not fully declared in your C headers but is still required for
+your project Futhark will generate a `type SomeType = distinct object` dummy
+type for it. Since most C libraries will pass things by pointer this makes sure
+that a `ptr SomeType` can exist and be passed around without having to know
+anything about `SomeType`. Disabling this feature will remove these definitions
+but might mean some procedure definitions now have invalid parameters or return
+types. This is mostly useful in conjunction with `nodeclguards` and manually
+declaring these types.
+
+### Hiding symbols functionality
+To avoid editors showing the renamed identifiers used by the object
+rename/override functionality they are hidden by default. If however you want
+to generate documentation for a Futhark generated module these fields won't be
+visible and the documentation mostly useless. With `exportall` these symbols
+will be exported as well and documentation will be readable. This is mostly
+useful if you want to export documentation but can't use `nodeclguards` (which
+makes even more readable documentation).
 
 ## Destructors
 If you are using a C library you will probably want to wrap destructor calls.
@@ -179,11 +222,12 @@ less work in actually trying to understand C, which means that all this work
 can be spent on quality Nim translation.
 
 # Sounds great, what's the catch?
-Futhark is currently in an alpha state. It currently doesn't support C++, and
+Futhark is currently in an beta state, it works really well but you might run
+into occasional bugs or hickups. It also doesn't support C++ at the moment, and
 it doesn't understand things like function-style macros. It might also mess up
-on definition types which haven't been encountered yet, although this is more
-and more rare as people use it. All of these things are things I hope to get
-fixed up.
+on strange C things which haven't been encountered yet, although this is more
+and more rare as people use it. All of these shortcomings are things I hope to
+get fixed up over time.
 
 # Installation
 To install Futhark you first need to have clang installed. Installing clang on
