@@ -66,17 +66,18 @@ generates all the Nim definitions.
 The three main things you need to know to use Futhark is `sysPath`, `path`, and
 normal imports (the `"stb_image.h"` part in the above example).
 - `sysPath` denotes system paths, these will be passed to Øpir to make sure
-  Clang knows where to find all the definitions.
+  Clang knows where to find all the definitions. This can also be passed with
+  `-d:sysPath:<path 1>:<path 2>` if you want to automatically generate these.
 - `path` denotes library paths, these will also be passed to Øpir, but anything
   found in these paths which is used by the files you have in your project will
-  be wrapped by Futhark.
+  be wrapped by Futhark as well.
 - Files listed in quotes in the importc are equivalent to `#include "file.h"`
   in C. Futhark will generate all definitions in these files, and if `file.h`
   imports more files found in any of the paths passed in by `path` these files
   will also be imported.
 
 Note: The difference between `sysPath` and `path` is simply about how Futhark
-handles the file. `sysPath` are paths which are fed to Øpir and Clang in order
+handles the files. `sysPath` are paths which are fed to Øpir and Clang in order
 to make Clang able to read all the types. `path` are the paths Futhark takes
 into account when generating definitions. This difference exists to make sure
 Futhark doesn't import all kinds of low-level system stuff which is already
@@ -148,10 +149,15 @@ about `SomeType`.
 
 ## Destructors
 If you are using a C library you will probably want to wrap destructor calls.
-Futhark makes all C objects `{.pure, inheritable.}` which means you can quite easily use somewhat idiomatic Nim to achieve destructors.
+Futhark makes all C objects `{.pure, inheritable.}` which means you can quite
+easily use somewhat idiomatic Nim to achieve destructors.
+
 An example usecase from MiniAudio bindings is as follows:
 ```nim
-type TAudioEngine = object of maEngine # Creates a new object in this scope, which allows destructors
+type TAudioEngine = object of maEngine # Creates a new object in this scope
+                                       # maEngine is a type wrapped by Futhark
+                                       # TAudioEngine can now have a destructor
+                                       # attached to it
 
 proc `=destroy`(engine: var TAudioEngine) = # Define a destructor as normal
   maEngineUninit(engine.addr)
@@ -175,15 +181,16 @@ can be spent on quality Nim translation.
 # Sounds great, what's the catch?
 Futhark is currently in an alpha state. It currently doesn't support C++, and
 it doesn't understand things like function-style macros. It might also mess up
-on definition types I haven't seen yet in the small handful of libraries I've
-tested it against. All of these things are things I hope to get fixed up.
+on definition types which haven't been encountered yet, although this is more
+and more rare as people use it. All of these things are things I hope to get
+fixed up.
 
 # Installation
 To install Futhark you first need to have clang installed. Installing clang on
 Linux is as simple as just grabbing it from your package manager (e.g. `sudo
 apt install libclang-dev`). To install clang on Windows you need to install
-[LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-13.0.1) (you
-probably want to grab the `LLVM-13.0.1-win64.exe` version).
+[LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-15.0.6) (you
+probably want to grab the `LLVM-15.0.6-win64.exe` version).
 
 If you have Clang installed in your system path you can now simply run:
 ```
@@ -206,4 +213,3 @@ even if it is the same as for Linux, just in order to add it as a note.
 ## TODO
 - Proper handling of C macros (inherently hard because C macros are typeless)
 - Find way to not require C compiler include paths
-- Verify if/make it work on Windows and Mac
