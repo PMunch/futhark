@@ -24,6 +24,7 @@ const
     "when", "while",
     "xor",
     "yield"]
+  syspaths {.strdefine.} = ""
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -472,6 +473,8 @@ macro importc*(imports: varargs[untyped]): untyped =
         defs = quote do: `defs` & ("#include " & `toImport` & "\n")
         files.add toImport
     else: error "Unknown argument passed to importc: " & $node.repr
+  for path in syspaths.split(":"):
+    cargs.add superQuote do: "-I" & absolutePath(`path`, getProjectPath())
   result.add quote do: importcImpl(`defs`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`))
 
 macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
