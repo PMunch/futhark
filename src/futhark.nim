@@ -25,8 +25,29 @@ const
     "xor",
     "yield"]
   syspaths {.strdefine.} = ""
+  norenames = defined(norenames)
+  nodeclguards = defined(nodeclguards) or norenames
+  exportall = defined(exportall) or nodeclguards
+  opirRebuild = defined(opirRebuild)
+  futharkRebuild = defined(futharkRebuild) or opirRebuild
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
+
+proc exportMark(n: NimNode): NimNode =
+  when exportall:
+    n.postfix "*"
+  else:
+    n
+
+proc declGuard(name, decl: NimNode): NimNode =
+  when nodeclguards:
+    decl
+  else:
+    superQuote do:
+      when not declared(`name`):
+        `decl`
+      else:
+        static: hint("Declaration of " & `name.strVal` & " already exists, not redeclaring")
 
 type
   RenameCallback = proc(name: string, kind: string, partof = ""): string
@@ -211,20 +232,14 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       value = parseInt(field["value"].str)
       fname = state.sanitizeName(field["name"].str, "enumval").ident
     if origName.len == 0:
-      consts.add superQuote do:
-        when not declared(`fname`):
-          const `fname`*: `baseType` = `newLit(value)`
-        else:
-          static: hint("Declaration of " & `fname.strVal` & " already exists, not redeclaring")
+      consts.add fname.declGuard(superQuote do:
+        const `fname`*: `baseType` = `newLit(value)`)
     else:
       if not values.hasKey(value):
         values[value] = fname
       else:
-        consts.add superQuote do:
-          when not declared(`fname`):
-            const `fname`* = `name`.`values[value]`
-          else:
-            static: hint("Declaration of " & `fname.strVal` & " already exists, not redeclaring")
+        consts.add fname.declGuard(superQuote do:
+          const `fname`* = `name`.`values[value]`)
     state.knownValues.incl fname.strVal
   if origName.len != 0:
     values.sort(system.cmp)
@@ -237,17 +252,14 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
         dummy""")[0][0]
     typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))))
     typedef[2] = enumTy
-    state.extraTypes.add quote do:
-      when not declared(`name`):
-        type
-          `name`* {.size: sizeof(`baseType`).} = `enumTy`
-      else:
-        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+    state.extraTypes.add name.declGuard(quote do:
+      type
+        `name`* {.size: sizeof(`baseType`).} = `enumTy`)
   state.extraTypes.add consts
 
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
   let name = block:
-    let coreName = state.typeDefMap.getOrDefault(origName, origName.ident).postfix "*"
+    let coreName = state.typeDefMap.getOrDefault(origName, origName.ident).exportMark
     var pragmas =
       if node["kind"].str == "union":
         @[ident"union"]
@@ -346,11 +358,7 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
     newEmptyNode(),
     newEmptyNode()
   )
-  state.procs.add quote do:
-    when not declared(`nameIdent`):
-      `def`
-    else:
-      static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+  state.procs.add nameIdent.declGuard(def)
 
 proc createVar(origName: string, node: JsonNode, state: var State) =
   let
@@ -361,11 +369,8 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
     of "external": nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(origName)))
     else: Empty()
   let pragmaExpr = nnkPragmaExpr.newTree(nameIdent.postfix "*", pragmas)
-  state.procs.add quote do:
-    when not declared(`nameIdent`):
-      var `pragmaExpr`: `typeIdent`
-    else:
-      static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+  state.procs.add nameIdent.declGuard(quote do:
+    var `pragmaExpr`: `typeIdent`)
 
 proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
   let
@@ -393,27 +398,21 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
     let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
     let renamed = state.renamed.getOrDefault(node["type"]["value"].str, node["type"]["value"].str)
     if (state.typeNameMap.hasKey(renamed) or state.knownValues.contains renamed):
-      state.procs.add quote do:
-        when not declared(`nameIdent`):
-          when `value` is typedesc:
-            `newConstTypeStmt`
-          else:
-            when `value` is static:
-              `newConstValueStmt`
-            else:
-              `newLetValueStmt`
+      state.procs.add nameIdent.declGuard(quote do:
+        when `value` is typedesc:
+          `newConstTypeStmt`
         else:
-          static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+          when `value` is static:
+            `newConstValueStmt`
+          else:
+            `newLetValueStmt`)
   else:
     state.knownValues.incl nameIdent.strVal
-    state.procs.add quote do:
-      when not declared(`nameIdent`):
-        when `value` is static:
-          `newConstValueStmt`
-        else:
-          `newLetValueStmt`
+    state.procs.add nameIdent.declGuard(quote do:
+      when `value` is static:
+        `newConstValueStmt`
       else:
-        static: hint("Declaration of " & `origName` & " already exists, not redeclaring")
+        `newLetValueStmt`)
 
 type
   FromTo = tuple[f, t: string]
@@ -514,14 +513,14 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       files
 
   # Check if everything can be skipped and we can simply include our cached results
-  if fileExists(futharkCache) and not defined(futharkRebuild):
+  if fileExists(futharkCache) and not futharkRebuild:
     hint "Using cached Futhark output: " & futharkCache
     return quote do:
       include `futharkCache`
 
   # Check if we have an old Opir output and the user just specified different post-processing steps
   let output =
-    if fileExists(opirCache) and not defined(opirRebuild):
+    if fileExists(opirCache) and not opirRebuild:
       hint "Using cached Opir output: " & opirCache
       staticRead(opirCache)
     else:
@@ -560,7 +559,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   if fut == nil:
     error "Unable to parse output of opir:\n" & output
 
-  if not fileExists(opirCache) or defined(opirRebuild):
+  if not fileExists(opirCache) or opirRebuild:
     hint "Caching Opir output in " & opirCache
     writeFile(opirCache, output)
 
@@ -621,8 +620,8 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     if state.entities.hasKey(name):
       let saneName = if state.renamed.hasKey(name): state.renamed[name] else: state.sanitizeName(state.entities[name])
       if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
-        state.typeDefMap[name] = genSym(nskType, saneName)
-        state.typeNameMap[name] = genSym(nskType, saneName)
+        state.typeDefMap[name] = when norenames: newIdentNode(saneName) else: genSym(nskType, saneName)
+        state.typeNameMap[name] = when norenames: newIdentNode(saneName) else:  genSym(nskType, saneName)
 
       if state.entities[name]["kind"].str == "typedef":
         if state.entities[name]["type"]["kind"].str == "base" and state.entities[name]["type"]["value"].str == "void":
@@ -649,7 +648,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
         createStruct(node["name"].str, state.renamed[node["name"].str], node, state, comment)
       of "typedef":
         var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
-        newType[0] = state.typeDefMap[node["name"].str].postfix "*"
+        newType[0] = state.typeDefMap[node["name"].str].exportMark
         newType[^1] = node["type"].toNimType(state)
         if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
           continue
@@ -669,8 +668,9 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   # Add non-dependant types and auxilary types
   result = newStmtList()
-  result.add quote do:
-    from macros import hint
+  if not nodeclguards:
+    result.add quote do:
+      from macros import hint
   result.add state.extraTypes
 
   # Generate required opaque types
@@ -678,35 +678,31 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     let
       origIdent = state.renamed[o].ident
       ident = state.typeDefMap.getOrDefault(o, origIdent)
-    result.add quote do:
-      when not declared(`origIdent`):
-        type
-          `ident`* = distinct object
-      else:
-        static: hint("Declaration of " & `o` & " already exists, not redeclaring")
-
-  # Generate conditionals to define inner object types if not previously defined
-  for name, defIdent in state.typeDefMap:
-    if defIdent.strVal == "void": continue
-    let
-      origIdent = state.renamed[name].ident
-      nameIdent = state.typeNameMap[name]
-    state.types.add (quote do:
+    result.add origIdent.declGuard(quote do:
       type
-        `nameIdent`* = (when declared(`origIdent`): `origIdent` else: `defIdent`))[0]
+        `ident`* = distinct object)
+
+  when not norenames:
+    # Generate conditionals to define inner object types if not previously defined
+    for name, defIdent in state.typeDefMap:
+      if defIdent.strVal == "void": continue
+      let
+        origIdent = state.renamed[name].ident
+        nameIdent = state.typeNameMap[name].exportMark
+      state.types.add (quote do:
+          type
+            `nameIdent` = (when declared(`origIdent`): `origIdent` else: `defIdent`))[0]
   result.add state.types
 
-  # Generate conditionals to define objects if not previously defined
-  for name, defIdent in state.typeDefMap:
-    if defIdent.strVal == "void": continue
-    let origIdent = state.renamed[name].ident
-    if state.entities[name]["kind"].str != "enum":
-      result.add quote do:
-        when not declared(`origIdent`):
+  when not nodeclguards:
+    # Generate conditionals to define objects if not previously defined
+    for name, defIdent in state.typeDefMap:
+      if defIdent.strVal == "void": continue
+      let origIdent = state.renamed[name].ident
+      if state.entities[name]["kind"].str != "enum":
+        result.add origIdent.declGuard(quote do:
           type
-             `origIdent`* = `defIdent`
-        else:
-          static: hint("Declaration of " & `name` & " already exists, not redeclaring")
+             `origIdent`* = `defIdent`)
 
   # Add generated procedures
   result.add state.procs
