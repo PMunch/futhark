@@ -496,7 +496,9 @@ macro importc*(imports: varargs[untyped]): untyped =
       cargs.add superQuote do: "-I" & absolutePath(`path`, getProjectPath())
       sysPathDefined = true
   if not sysPathDefined:
-    cargs.add superQuote do: "-I" & getClangIncludePath()
+    let clangIncludePath = getClangIncludePath()
+    if clangIncludePath != "":
+      cargs.add newLit("-I" & clangIncludePath)
   result.add quote do: importcImpl(`defs`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`))
 
 macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
