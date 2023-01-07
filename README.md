@@ -13,7 +13,6 @@ import futhark
 # Tell futhark where to find the C libraries you will compile with, and what
 # header files you wish to import.
 importc:
-  sysPath "/usr/lib/clang/12.0.1/include"
   path "../stb"
   define STB_IMAGE_IMPLEMENTATION
   "stb_image.h"
