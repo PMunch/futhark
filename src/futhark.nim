@@ -212,13 +212,19 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       fname = state.sanitizeName(field["name"].str, "enumval").ident
     if origName.len == 0:
       consts.add superQuote do:
-        const `fname`*: `baseType` = `newLit(value)`
+        when not declared(`fname`):
+          const `fname`*: `baseType` = `name`.`newLit(value)`
+        else:
+          static: hint("Declaration of " & `fname.strVal` & " already exists, not redeclaring")
     else:
       if not values.hasKey(value):
         values[value] = fname
       else:
         consts.add superQuote do:
-          const `fname`* = `values[value]`
+          when not declared(`fname`):
+            const `fname`* = `name`.`values[value]`
+          else:
+            static: hint("Declaration of " & `fname.strVal` & " already exists, not redeclaring")
     state.knownValues.incl fname.strVal
   if origName.len != 0:
     values.sort(system.cmp)
