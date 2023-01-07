@@ -39,7 +39,7 @@ type
     typeNameMap: Table[string, NimNode]
     renamed: Table[string, string]
     usedNames: HashSet[string]
-    used: HashSet[string]
+    used: OrderedSet[string]
     knownValues: HashSet[string]
     types: NimNode
     procs: NimNode
@@ -89,7 +89,7 @@ proc findAlias(kind: JsonNode): string =
     error("Unknown kind in findAlias: " & $kind)
     ""
 
-proc addUsings(used: var HashSet[string], node: JsonNode) =
+proc addUsings(used: var OrderedSet[string], node: JsonNode) =
   case node["kind"].str:
   of "proc":
     let alias = node["return"].findAlias
@@ -385,7 +385,8 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
   if node["type"]["kind"].str == "alias":
     if value == nameIdent: return
     let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
-    if (state.typeNameMap.hasKey(node["type"]["value"].str) or state.knownValues.contains node["type"]["value"].str):
+    let renamed = state.renamed.getOrDefault(node["type"]["value"].str, node["type"]["value"].str)
+    if (state.typeNameMap.hasKey(renamed) or state.knownValues.contains renamed):
       state.procs.add quote do:
         when not declared(`nameIdent`):
           when `value` is typedesc:
@@ -602,11 +603,12 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
   var usedLen = 0
   while state.used.len > usedLen:
     usedLen = state.used.len
-    var newUsed = initHashSet[string]()
+    var newUsed = initOrderedSet[string]()
     for name in state.used:
       if state.entities.hasKey(name):
         newUsed.addUsings(state.entities[name])
-    state.used.incl newUsed
+    for name in newUsed:
+      state.used.incl name
 
   # Generate temporary names to allow overriding definitions
   for name in state.used:
