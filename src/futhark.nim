@@ -233,7 +233,7 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       fname = state.sanitizeName(field["name"].str, "enumval").ident
     if origName.len == 0:
       consts.add fname.declGuard(superQuote do:
-        const `fname`*: `baseType` = `newLit(value)`)
+        const `fname`* = `baseType`(`newLit(value)`))
     else:
       if not values.hasKey(value):
         values[value] = fname
