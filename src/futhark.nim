@@ -30,6 +30,7 @@ const
   exportall = defined(exportall) or nodeclguards
   opirRebuild = defined(opirRebuild)
   futharkRebuild = defined(futharkRebuild) or opirRebuild
+  preAnsiFuncDecl = defined(preAnsiFuncDecl)
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -179,7 +180,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       var procTy = nnkProcTy.newTree(
         nnkFormalParams.newTree(json["return"].toNimType(state)),
         nnkPragma.newTree(json["callingConvention"].str.ident))
-      if json["variadic"].bval:
+      if json["variadic"].bval and (json["proto"].bval or preAnsiFuncDecl):
         procTy[^1].add "varargs".ident
       if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias" and not state.entities.hasKey(json["return"]["base"]["value"].str):
         state.opaqueTypes.incl json["return"]["base"]["value"].str

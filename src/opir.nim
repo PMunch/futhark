@@ -40,6 +40,7 @@ proc toNimCallingConv(cc: CXCallingConv): string =
   of CXCallingConv_Unexposed: "unexposedCallingConv"
 
 proc genStructDecl(struct: CXCursor): JsonNode
+proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode
 
 proc toNimType(ct: CXType): JsonNode =
   case ct.kind:
@@ -107,14 +108,8 @@ proc toNimType(ct: CXType): JsonNode =
       newJNull()
   of CXType_LValueReference, CXType_RValueReference, CXType_ObjCInterface, CXType_ObjCObjectPointer: %*{"kind": "invalid", "value": "???"}
   of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
-  #of CXType_FunctionNoProto: %*{"kind": "invalid", "value": "func_noproto?"}
   of CXType_FunctionProto, CXType_FunctionNoProto:
-    # TODO: Move to use genProcDecl? Or at least share code
-    let retType = ct.getResultType
-    var args: seq[JsonNode]
-    for i in 0.cuint..<ct.getNumArgTypes.cuint:
-      args.add ct.getArgType(i).toNimType
-    %*{"kind": "proc", "return": retType.toNimType, "arguments": args, "callingConvention": ct.getFunctionTypeCallingConv.toNimCallingConv, "variadic": (ct.isFunctionTypeVariadic != 0) }
+    ct.genProcDecl()
   of CXType_ConstantArray:
     %*{"kind": "array", "size": ct.getNumElements, "value": ct.getElementType.toNimType}
   of CXType_IncompleteArray:
@@ -265,11 +260,8 @@ proc genVarDecl(vardecl: CXCursor): JsonNode =
     of CXLinkage_External: "external" # This is C `extern`
   %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": $varDecl.getCursorSpelling, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
 
-proc genProcDecl(funcDecl: CXCursor): JsonNode =
-  let funcDeclType = funcDecl.getCursorType
-  let name = $funcDecl.getCursorSpelling
+proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
   let retType = funcDeclType.getResultType
-  let location = getLocation(funcdecl)
   var args: seq[JsonNode]
   var variadic = (funcDeclType.isFunctionTypeVariadic != 0)
   for i in 0.cuint..<funcDeclType.getNumArgTypes.cuint:
@@ -281,12 +273,27 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
       if funcDeclType.getArgType(i).kind == CXType_Elaborated:
         if funcDeclType.getArgType(i).getTypeDeclaration.kind == CXCursor_EnumDecl:
           kind = %*{"kind": "alias", "value": $funcDeclType.getArgType(i).getTypeDeclaration.getCursorSpelling}
-    var aname = $funcDecl.Cursor_getArgument(i).getCursorSpelling
+    var aname = ""
+    if funcDecl.isSome:
+      aname = $funcDecl.get.Cursor_getArgument(i).getCursorSpelling
     if aname == "":
       aname = "a" & $i
     args.add %*{"name": aname, "type": kind}
-  %*{"kind": "proc", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "return": retType.toNimType, "arguments": args, "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv, "variadic": variadic, "inlined": funcDecl.Cursor_isFunctionInlined() == 1}
+  result = %*{"kind": "proc", "return": retType.toNimType, "arguments": args,
+              "callingConvention": funcDeclType.getFunctionTypeCallingConv.toNimCallingConv,
+              "variadic": variadic, "proto": funcDeclType.kind == CXType_FunctionProto }
+  if funcDecl.isSome:
+    let
+      name = $funcDecl.get.getCursorSpelling
+      location = getLocation(funcDecl.get)
+    result["file"] = %location.filename
+    result["position"] = %*{"column": location.column, "line": location.line}
+    result["name"] = %name
+    result["inlined"] = %(funcDecl.get.Cursor_isFunctionInlined() == 1)
 
+proc genProcDecl(funcDecl: CXCursor): JsonNode =
+  let funcDeclType = funcDecl.getCursorType
+  genProcDecl(funcDeclType, some(funcDecl))
 
 var fileCache: Table[string, string] # TODO: Is there some way to get the macro body so we don't have to do this?
 proc genMacroDecl(macroDef: CXCursor): JsonNode =

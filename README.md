@@ -189,6 +189,20 @@ will be exported as well and documentation will be readable. This is mostly
 useful if you want to export documentation but can't use `nodeclguards` (which
 makes even more readable documentation).
 
+## Pre-ANSI C function declarations
+Also known as K&R style functions. By definition C code like
+```c
+int* myfunc();
+```
+is a pre-ansi C function declaration that says `myfunc` returns a pointer to an
+integer *and takes any number of arguments*. This last part is a historic thing
+you can read more about [here](https://jameshfisher.com/2016/11/27/c-k-and-r/),
+but suffice to say this is misused in quite a lot of C libraries to mean that
+the function takes no arguments. Since this is fairly obscure, and Nim will
+create bad C code if the varargs pragma is attached to a function without
+arguments this is ignored by default. However if you for some reason require
+this you might add `-d:preAnsiFuncDecl` while compiling.
+
 ## Destructors
 If you are using a C library you will probably want to wrap destructor calls.
 Futhark makes all C objects `{.pure, inheritable.}` which means you can quite
