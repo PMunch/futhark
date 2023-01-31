@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.7.3" # Remember to update the version in futhark.nim as well
+version       = "0.7.4" # Remember to update the version in futhark.nim as well
 author        = "PMunch"
 description   = "A package which uses libclang to parse C headers into Nim files for easy interop"
 license       = "MIT"
