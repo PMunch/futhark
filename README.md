@@ -62,14 +62,17 @@ then reads this file and applies any overrides to types and names before it
 generates all the Nim definitions.
 
 ## Basic usage
-The three main things you need to know to use Futhark is `sysPath`, `path`, and
-normal imports (the `"stb_image.h"` part in the above example).
+The four main things you need to know to use Futhark is `sysPath`, `path`,
+`compilerArgs`, and normal imports (the `"stb_image.h"` part in the above
+example).
 - `sysPath` denotes system paths, these will be passed to Øpir to make sure
   Clang knows where to find all the definitions. This can also be passed with
   `-d:sysPath:<path 1>:<path 2>` if you want to automatically generate these.
 - `path` denotes library paths, these will also be passed to Øpir, but anything
   found in these paths which is used by the files you have in your project will
   be wrapped by Futhark as well.
+- `comppilerArgs` specifies additional flags that should be passed to Clang
+  when parsing the C headers.
 - Files listed in quotes in the importc are equivalent to `#include "file.h"`
   in C. Futhark will generate all definitions in these files, and if `file.h`
   imports more files found in any of the paths passed in by `path` these files
