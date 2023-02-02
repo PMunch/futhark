@@ -203,6 +203,17 @@ create bad C code if the varargs pragma is attached to a function without
 arguments this is ignored by default. However if you for some reason require
 this you might add `-d:preAnsiFuncDecl` while compiling.
 
+## Deeper control
+In case you face issues that aren't easily solveable there is one last option
+for making modifications, and this is Øpir hooks. Since Øpir converts your C
+imports to a JSON format you're able to register hooks that will be run before
+Futhark consumes this JSON. These are simple procedures which takes a `JsonNode`
+and returns a `JsonNode`. With this you're able to change every aspect of the
+JSON, and even add or remove definitions. The callbacks are a list, so modules
+to perform certain commonly done transformations (e.g. combine similarly named
+constants into an enum) could be added to the list of callbacks easily. To add
+these simply add in `outputPath <procedure name>` to your `importc` block.
+
 ## Destructors
 If you are using a C library you will probably want to wrap destructor calls.
 Futhark makes all C objects `{.pure, inheritable.}` which means you can quite
@@ -217,6 +228,48 @@ type TAudioEngine = object of maEngine # Creates a new object in this scope
 
 proc `=destroy`(engine: var TAudioEngine) = # Define a destructor as normal
   maEngineUninit(engine.addr)
+```
+
+# Shipping wrappers
+If you've built wrappers with Futhark, and expanded them with a Nim interface
+and now it's time to share them. This section will give some best-practices on
+how to ship wrappers. Since the Øpir tool requires Clang to be installed it can
+be a bit tricky to get Futhark installed. In addition to this Futhark obviously
+requires access to the C header files, which might be installed in different
+places based on the system. Because of these things you might not want to have
+Futhark as a dependency for your bindings. To help with this Futhark has a
+`outputPath` argument which can be added to the `importc` block. This path is
+where the completed bindings will be stored, and also where Futhark will look
+for existing bindings to avoid rebuilding them. This means that with the
+`outputPath` set to a file you will need to use `-d:futharkRebuild` to update
+the file when you make changes in the `importc` block. If you set `outputPath`
+to a folder then `futhark` will store the files with the appended hash in this
+folder instead of in the `nimcache` folder and caching will work as usual. By
+using this feature you will be able to set a path local to your project and
+check the generated Futhark file into your version control system. But that is
+only half the job, because to be aware of the cache file Futhark still needs to
+be installed. The recommended way to get around this is to do a
+`when defined(useFuthark)` switch to check whether the user wants to use Futhark
+directly or to use the shipped wrapper. It is recommended to use the exact name
+`useFuthark`, this way the user can turn on Futhark for the entire project (in
+case you have imported another library which also uses Futhark). If you want to
+give the user the option to switch on Futhark for only your project it is
+recommended to use an additional switch with `useFutharkFor<project name>`.
+
+A complete sample would look a bit something like this:
+
+```nim
+const futharkFile = "futhark_generated/generated.nim"
+when defined(useFuthark) or defined(useFutharkForExample):
+  import futhark
+
+  importc:
+    outputPath futharkFile
+    path "<path to library>"
+    "libfile.h"
+else:
+  include futharkFile
+
 ```
 
 # But why not use c2nim or nimterop?

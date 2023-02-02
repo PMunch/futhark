@@ -1,4 +1,4 @@
-import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings
+import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils
 import macroutils except Lit
 
 const
@@ -52,6 +52,7 @@ proc declGuard(name, decl: NimNode): NimNode =
 
 type
   RenameCallback = proc(name: string, kind: string, partof = ""): string
+  OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
   State = object
     entities: OrderedTable[string, JsonNode]
     opaqueTypes: HashSet[string]
@@ -446,12 +447,14 @@ macro importc*(imports: varargs[untyped]): untyped =
     nodes = imports[0]
   var
     defs = newLit("")
+    outputPath = newLit("")
     files = nnkBracket.newTree()
     importDirs = nnkBracket.newTree()
     cargs = nnkBracket.newTree()
     renames: seq[FromTo]
     retypes: seq[FromTo]
     renameCallback = newNilLit()
+    opircallbacks = nnkPrefix.newTree(newIdentNode("@"), nnkBracket.newTree())
     sysPathDefined = false
   for node in nodes:
     case node.kind:
@@ -485,6 +488,10 @@ macro importc*(imports: varargs[untyped]): untyped =
         retypes.add (f: node[1].repr, t: node[2].repr)
       of "renamecallback":
         renameCallback = node[1]
+      of "addopircallback":
+        opircallbacks[1].add node[1]
+      of "outputpath":
+        outputPath = node[1]
       else:
         let toImport = genSym(nskConst)
         result.add quote do:
@@ -500,9 +507,9 @@ macro importc*(imports: varargs[untyped]): untyped =
     let clangIncludePath = getClangIncludePath()
     if clangIncludePath != "":
       cargs.add newLit("-I" & clangIncludePath)
-  result.add quote do: importcImpl(`defs`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`))
+  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`))
 
-macro importcImpl*(defs: static[string], compilerArguments, files: static[openArray[string]], importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback]): untyped =
+macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
   ## be converted is compiled with `compilerArguments` passed directly to clang.
@@ -521,8 +528,13 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
     cmd = "opir " & compilerArguments.join(" ") & " " & fname
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
-    fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !& hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash))
-    futharkCache = cacheDir / "futhark_" & fullHash.toHex & ".nim"
+    opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
+    fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !&
+      hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash) !&
+      (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it[0].symBodyHash)).foldl(a !& b) else: hash("")))
+    futharkCache = if outputPath.len == 0: cacheDir / "futhark_" & fullHash.toHex & ".nim"
+      elif dirExists(outputPath): outputPath / "futhark_" & fullHash.toHex & ".nim"
+      else: outputPath
     opirCache = cacheDir / "opir_" & (!$opirHash).toHex & ".json"
     extraFiles = block:
       var files: HashSet[string]
@@ -570,7 +582,7 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
 
   hint "Parsing Opir output"
   # TODO: Clear out old cache files?
-  let
+  var
     fut = try:
       output.parseJson
     except JsonParsingError:
@@ -596,6 +608,9 @@ macro importcImpl*(defs: static[string], compilerArguments, files: static[openAr
       state.fieldRenames.mgetOrPut(oldName[0], default(Table[string, string]))[oldName[1]] = rename.t.nimIdentNormalize()
     else:
       state.renamed[oldname[0]] = rename.t.nimIdentNormalize()
+
+  for opirCallback in opirCallbacks:
+    fut = opirCallback(fut)
 
   # Gather symbols from first level of hierarchy
   for node in fut:
