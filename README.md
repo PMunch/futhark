@@ -262,18 +262,24 @@ recommended to use an additional switch with `useFutharkFor<project name>`.
 A complete sample would look a bit something like this:
 
 ```nim
-const futharkFile = "futhark_generated/generated.nim"
 when defined(useFuthark) or defined(useFutharkForExample):
-  import futhark
+  import futhark, os
 
   importc:
-    outputPath futharkFile
+    outputPath currentSourcePath.parentDir / "generated.nim"
     path "<path to library>"
     "libfile.h"
 else:
-  include futharkFile
-
+  include "generated.nim"
 ```
+
+Keep in mind that when your package is installed the generated Futhark output
+would be placed in the folder of your package using this code. If the
+`/ "generated.nim"` part is left of then the file would be named
+`futhark_<hash>.nim` as described above, this means that your `include` could
+use the one specified in your package installation, while users doing
+`useFuthark` would generate one based on its hash (or reuse yours if the hash
+matches).
 
 # But why not use c2nim or nimterop?
 Both c2nim and nimterop have failed me in the past when wrapping headers. This
