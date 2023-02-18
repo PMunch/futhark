@@ -233,6 +233,44 @@ proc `=destroy`(engine: var TAudioEngine) = # Define a destructor as normal
   maEngineUninit(engine.addr)
 ```
 
+## Dynamic libraries and implementing headers
+If you are making a dynamic or static library to be loaded or linked with
+another program you are often given a header file to implement. This file
+typically includes the types and functions you are able to call from the main
+program, along with the procedures that your application has to implement in
+order to be loaded and run correctly. Futhark normally imports all headers on
+the assumption that things will be made available from C while compiling, ie.
+it adds the `importc` pragma to them. But in order to support this scenario you
+can also get it to create forward declarations with the `exportc` pragma. This
+allows Nim to know that there has to exist an implementation for a given
+procedure in your application, and as such will fail to compile if you're
+missing an implementation. It will also make sure that your signature is
+exported correctly and matches the intended C header. To do this simply define
+the procedures to be forward declared like this along with your other options:
+
+```nim
+importc:
+  forward "proc_to_forward"
+```
+
+Futark will automatically add the `dynlib` pragma to this declaration if you're
+buildin with `--app:lib`, but if you need to add more pragmas you can list them
+after the name like so:
+
+```nim
+macro customPragma(msg: static[string], body: untyped): untyped =
+  echo "Saying: ", msg
+  return body
+
+importc:
+  forward "proc_to_forward", customPragma("Hello world"), used
+```
+
+If you want to see what code Futhark generated for your forward declarations,
+and therefore the signature you need to match (even the argument names), you
+can pass `-d:echoForwards` and they will be written out in the terminal while
+compiling.
+
 # Shipping wrappers
 If you've built wrappers with Futhark, and expanded them with a Nim interface
 and now it's time to share them. This section will give some best-practices on

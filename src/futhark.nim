@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.8.0"
+  VERSION = "0.9.0"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -31,6 +31,7 @@ const
   opirRebuild = defined(opirRebuild)
   futharkRebuild = defined(futharkRebuild) or opirRebuild
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
+  echoForwards = defined(echoForwards)
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -53,6 +54,9 @@ proc declGuard(name, decl: NimNode): NimNode =
 type
   RenameCallback = proc(name: string, kind: string, partof = ""): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
+  Forward = object
+    name: string
+    extraPragmas: seq[string]
   State = object
     entities: OrderedTable[string, JsonNode]
     opaqueTypes: HashSet[string]
@@ -68,6 +72,7 @@ type
     procs: NimNode
     extraTypes: NimNode
     renameCallback: RenameCallback
+    forwards: seq[Forward]
 
 proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
   result = origName
@@ -349,8 +354,26 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
 proc createProc(origName: string, node: JsonNode, state: var State) =
   if node["inlined"].getBool: return
   let nameIdent = state.renamed[origName].ident
-  var def = node.toNimType(state)
-  def[1].add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
+  var
+    def = node.toNimType(state)
+    echoDef = false
+  block forwardBlock:
+    for forward in state.forwards:
+      if state.renamed[forward.name] == state.renamed[origName]:
+        def[1].add nnkExprColonExpr.newTree("exportc".ident, newLit(origName))
+        if appType == "lib":
+          def[1].add "dynlib".ident
+        for extra in forward.extraPragmas:
+          let pragmas = extra.parseExpr
+          if pragmas.kind == nnkTupleConstr:
+            for pragma in pragmas:
+              def[1].add pragma
+          else:
+            def[1].add pragmas
+        if echoForwards:
+          echoDef = true
+        break forwardblock
+    def[1].add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
   def = nnkProcDef.newTree(
     nameIdent.postfix "*",
     newEmptyNode(),
@@ -360,6 +383,7 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
     newEmptyNode(),
     newEmptyNode()
   )
+  if echoDef: echo def.repr
   state.procs.add nameIdent.declGuard(def)
 
 proc createVar(origName: string, node: JsonNode, state: var State) =
@@ -455,6 +479,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     retypes: seq[FromTo]
     renameCallback = newNilLit()
     opircallbacks = nnkPrefix.newTree(newIdentNode("@"), nnkBracket.newTree())
+    forwards = nnkPrefix.newTree(newIdentNode("@"), nnkBracket.newTree())
     sysPathDefined = false
   for node in nodes:
     case node.kind:
@@ -492,6 +517,11 @@ macro importc*(imports: varargs[untyped]): untyped =
         opircallbacks[1].add node[1]
       of "outputpath":
         outputPath = node[1]
+      of "forward":
+        var extras = nnkPrefix.newTree(newIdentNode("@"), nnkBracket.newTree())
+        for extra in 2..<node.len:
+          extras[1].add newLit(node[extra].repr)
+        forwards[1].add nnkObjConstr.newTree(bindSym("Forward"), nnkExprColonExpr.newTree("name".ident, node[1]), nnkExprColonExpr.newTree("extraPragmas".ident, extras))
       else:
         let toImport = genSym(nskConst)
         result.add quote do:
@@ -507,9 +537,11 @@ macro importc*(imports: varargs[untyped]): untyped =
     let clangIncludePath = getClangIncludePath()
     if clangIncludePath != "":
       cargs.add newLit("-I" & clangIncludePath)
-  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`))
+  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
 
-macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks]): untyped =
+proc hash*(n: NimNode): Hash = hash(n.treeRepr)
+
+macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], forwards: static[openArray[Forward]]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
   ## be converted is compiled with `compilerArguments` passed directly to clang.
@@ -531,6 +563,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
     fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !&
       hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash) !&
+      (if forwards.len != 0: forwards.mapIt(hash(it)).foldl(a !& b) else: hash("")) !&
       (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it[0].symBodyHash)).foldl(a !& b) else: hash("")))
     futharkCache = if outputPath.len == 0: cacheDir / "futhark_" & fullHash.toHex & ".nim"
       elif dirExists(outputPath): outputPath / "futhark_" & fullHash.toHex & ".nim"
@@ -599,7 +632,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     types: newNimNode(nnkTypeSection),
     procs: newStmtList(),
     extraTypes: newStmtList(),
-    renameCallback: renameCallback)
+    renameCallback: renameCallback,
+    forwards: forwards.toSeq)
 
   # Add explicit field renames
   for rename in renames:
