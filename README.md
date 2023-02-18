@@ -271,6 +271,12 @@ and therefore the signature you need to match (even the argument names), you
 can pass `-d:echoForwards` and they will be written out in the terminal while
 compiling.
 
+NOTE: Since the forward declaration has all the pragmas for passing it on as C
+compatible symbols you don't actually need to have these pragmas attached to
+your implementation which makes it a bit cleaner. And the procedure can of
+course be written in camelCase if you prefer, it will still match the forward
+declaration.
+
 # Shipping wrappers
 If you've built wrappers with Futhark, and expanded them with a Nim interface
 and now it's time to share them. This section will give some best-practices on
