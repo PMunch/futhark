@@ -20,7 +20,7 @@ const
     "shl", "shr", "static",
     "template", "try", "tuple", "type",
     "using",
-    "var",
+    "var", "void",
     "when", "while",
     "xor",
     "yield"]
@@ -166,6 +166,18 @@ proc addUsings(used: var OrderedSet[string], node: JsonNode) =
   else:
     error("Unknown node in addUsings: " & $node)
 
+proc addKnown(state: var State, known: string) =
+  state.knownValues.incl state.renamed[known]
+  state.opaqueTypes.excl known
+
+proc addEntity(state: var State, name: string, entity: JsonNode) =
+  state.entities[name] = entity
+  state.opaqueTypes.excl name
+
+proc addOpaque(state: var State, opaque: string) =
+  if not state.entities.hasKey(opaque) and opaque notin builtins:
+    state.opaqueTypes.incl opaque
+
 proc toNimType(json: JsonNode, state: var State): NimNode =
   result = case json["kind"].str:
     of "base": json["value"].str.ident
@@ -188,8 +200,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         nnkPragma.newTree(json["callingConvention"].str.ident))
       if json["variadic"].bval and (json["proto"].bval or preAnsiFuncDecl):
         procTy[^1].add "varargs".ident
-      if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias" and not state.entities.hasKey(json["return"]["base"]["value"].str):
-        state.opaqueTypes.incl json["return"]["base"]["value"].str
+      if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias":
+        state.addOpaque json["return"]["base"]["value"].str
       var
         i = 0
         usedFields: HashSet[string]
@@ -198,8 +210,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
           aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg", state.renameCallback) else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
-          if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias" and not state.entities.hasKey(arg["type"]["base"]["value"].str):
-            state.opaqueTypes.incl arg["type"]["base"]["value"].str
+          if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias":
+            state.addOpaque arg["type"]["base"]["value"].str
         procTy[0].add nnkIdentDefs.newTree(aname.ident, atype, newEmptyNode())
         inc i
       procTy
@@ -209,8 +221,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       else:
         nnkPtrTy.newTree(nnkBracketExpr.newTree("UncheckedArray".ident, json["value"].toNimType(state)))
     of "alias":
-      if not state.entities.hasKey(json["value"].str):
-        state.opaqueTypes.incl json["value"].str
+      if not state.knownValues.contains json["value"].str:
+        state.addOpaque json["value"].str
       state.typeNameMap[json["value"].str]
     of "enum":
       error "Unable to resolve nested enums from here"
@@ -247,7 +259,7 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       else:
         consts.add fname.declGuard(superQuote do:
           const `fname`* = `name`.`values[value]`)
-    state.knownValues.incl fname.strVal
+    state.addKnown field["name"].str
   if origName.len != 0:
     values.sort(system.cmp)
     for value, name in values:
@@ -321,8 +333,8 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
       newType[^1][^1].add newIdentDefs(fident, state.retypes[saneName][fname])
     else:
-      if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias" and not state.entities.hasKey(fieldType["base"]["value"].str):
-        state.opaqueTypes.incl fieldType["base"]["value"].str
+      if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias":
+        state.addOpaque fieldType["base"]["value"].str
       if fieldType["kind"].str == "enum":
         let enumName = saneName & "_" & fname & "_t"
         createEnum(enumName, fieldType, state, "")
@@ -433,7 +445,7 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
           else:
             `newLetValueStmt`)
   else:
-    state.knownValues.incl nameIdent.strVal
+    state.addKnown origName
     state.procs.add nameIdent.declGuard(quote do:
       when `value` is static:
         `newConstValueStmt`
@@ -561,7 +573,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
-    fullHash = !$(hash(renames) !& hash(retypes) !& opirHash !&
+    fullHash = !$(hash(nodeclguards) !& hash(noopaquetypes) !& hash(exportall) !&
+      hash(renames) !& hash(retypes) !& opirHash !&
       hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash) !&
       (if forwards.len != 0: forwards.mapIt(hash(it)).foldl(a !& b) else: hash("")) !&
       (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it[0].symBodyHash)).foldl(a !& b) else: hash("")))
@@ -650,7 +663,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   for node in fut:
     let name = if node.hasKey("name"): node["name"].str else: ""
     if node.hasKey("name"):
-      state.entities[name] = node
+      state.addEntity(name, node)
     # This triggers an error in the example, it needs to be compiled twice for it to work
     #if node["kind"].str == "const":
     #  state.used.incl node["name"].str

@@ -48,7 +48,7 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_Unexposed: %*{"kind": "invalid", "value": "unexposed?"}
   of CXType_Void: %*{"kind": "base", "value": "void"}
   of CXType_Bool: %*{"kind": "base", "value": "bool"}
-  of CXType_Char_U, CXType_UChar: %*{"kind": "base", "value": "cuchar"} # TODO: Difference between Char_U and UChar?
+  of CXType_Char_U, CXType_UChar: %*{"kind": "base", "value": "uint8"} # TODO: Difference between Char_U and UChar? cuchar is deprecated, use uint8 instead
   of CXType_Char16: %*{"kind": "base", "value": "int16"}
   of CXType_Char32: %*{"kind": "base", "value": "int32"}
   of CXType_UShort: %*{"kind": "base", "value": "cushort"}
