@@ -3,7 +3,7 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.9.0"
+  VERSION = "0.9.1"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -281,9 +281,9 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     let coreName = state.typeDefMap.getOrDefault(origName, origName.ident).exportMark
     var pragmas =
       if node["kind"].str == "union":
-        @[ident"union"]
+        @[ident"union", ident"bycopy"]
       else:
-        @[ident"pure", ident"inheritable"]
+        @[ident"pure", ident"inheritable", ident"bycopy"]
 
     if node.hasKey("packed") and node["packed"].bval == true:
       pragmas.add "packed".ident
