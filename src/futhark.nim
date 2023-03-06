@@ -31,7 +31,7 @@ const
   futharkRebuild = defined(futharkRebuild) or opirRebuild
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
-  VERSION = static:
+  VERSION = block:
     # source style, go up one dir
     var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
     if not fileExists(nimblePath):
