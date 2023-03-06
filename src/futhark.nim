@@ -458,7 +458,7 @@ type
 proc getClangIncludePath*(): string =
   ## This tries to get the Clang include path used as `sysPath`. It requires
   ## Clang to be in your path, but should otherwise work well.
-  const inclDir = staticExec("clang -print-resource-dir") / "include"
+  const inclDir = staticExec("clang -print-resource-dir").strip() / "include"
   when dirExists(inclDir):
     inclDir
   else:
@@ -569,7 +569,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   let
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & compilerArguments.join(" ") & " " & fname
+    cmd = "opir " & compilerArguments.quoteShellCommand() & " " & fname.quoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
@@ -601,15 +601,12 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       hint "Using cached Opir output: " & opirCache
       staticRead(opirCache)
     else:
-      discard staticExec("mkdir " & fname.parentDir)
+      # Required for gorgeEx()/staticExec() to "act" like cmd.exe
+      let cmdPrefix = when defined(windows): "cmd /c " else: ""
+      discard staticExec(cmdPrefix & "mkdir " & fname.parentDir.quoteShell())
       writeFile(fname, defs)
       hint "Running: " & cmd
-      let opirRes = gorgeEx(
-        when defined(windows):
-          # Required for gorgeEx() to "act" like cmd.exe
-          "cmd /c " & cmd
-        else:
-          cmd)
+      let opirRes = gorgeEx(cmdPrefix & cmd)
       if opirRes.exitCode != 0:
         var err = "Opir exited with non-zero exit code $1." % $opirRes.exitCode
         if opirRes.output != "":

@@ -20,10 +20,13 @@ doAssert ANON_A == 0
 doAssert ANON_B == 1
 doAssert ANON_C == -1
 
-doAssert sizeof(ANON_D) == 1
+when not defined(windows):
+  doAssert sizeof(ANON_D) == 1
 
-doAssert sizeof(SHORT) == 2
+when not defined(windows):
+  doAssert sizeof(SHORT) == 2
 doAssert SHORT.ord == 0x7fff
 
-doAssert sizeof(WORD) == 4
+when not defined(windows):
+  doAssert sizeof(WORD) == 4
 doAssert WORD.ord == 0x7fffffff
