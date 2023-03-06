@@ -3,7 +3,6 @@ import macroutils except Lit
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
-  VERSION = "0.9.1"
   builtins = ["addr", "and", "as", "asm",
     "bind", "block", "break",
     "case", "cast", "concept", "const", "continue", "converter",
@@ -32,6 +31,14 @@ const
   futharkRebuild = defined(futharkRebuild) or opirRebuild
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
+  VERSION = static:
+    var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
+    if not fileExists(nimblePath):
+      nimblePath = currentSourcePath().parentDir() / "futhark.nimble"
+    if fileExists(nimblePath):
+      staticExec("nimble dump --json " & nimblePath.quoteShell()).parseJson()["version"].getStr()
+    else:
+      "UNKNOWN"
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
