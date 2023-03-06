@@ -42,7 +42,6 @@ const
       nimblePath = "futhark"
     staticExec("nimble dump --json " & nimblePath.quoteShell()).parseJson()["version"].getStr()
 
-
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
 proc exportMark(n: NimNode): NimNode =
