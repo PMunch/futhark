@@ -37,10 +37,11 @@ const
     if not fileExists(nimblePath):
       # installed style, nimble file in same dir
       nimblePath = currentSourcePath().parentDir() / "futhark.nimble"
-    if fileExists(nimblePath):
-      staticExec("nimble dump --json " & nimblePath.quoteShell()).parseJson()["version"].getStr()
-    else:
-      "UNKNOWN"
+    if not fileExists(nimblePath):
+      # try find by name
+      nimblePath = "futhark"
+    staticExec("nimble dump --json " & nimblePath.quoteShell()).parseJson()["version"].getStr()
+
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
