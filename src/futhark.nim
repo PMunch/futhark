@@ -32,8 +32,10 @@ const
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
   VERSION = static:
+    # source style, go up one dir
     var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
     if not fileExists(nimblePath):
+      # installed style, nimble file in same dir
       nimblePath = currentSourcePath().parentDir() / "futhark.nimble"
     if fileExists(nimblePath):
       staticExec("nimble dump --json " & nimblePath.quoteShell()).parseJson()["version"].getStr()
