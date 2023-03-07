@@ -47,12 +47,13 @@ const
       warning "Couldn't find futhark version from 'nimble dump " & nimblePath & "'"
       "unknown"
 
-const buildOS {.strdefine.} = hostOS
+when not declared(buildOS):
+  const buildOS {.magic: "BuildOS".}: string = hostOS
 const windowsHost = buildOS == "windows"
 
 func hostQuoteShell(s: string): string =
   ## Quote ``s``, so it can be safely passed to shell.
-  when windowsHost:
+  if windowsHost:
     result = quoteShellWindows(s)
   else:
     result = quoteShellPosix(s)
@@ -63,6 +64,29 @@ proc hostQuoteShellCommand(args: openArray[string]): string =
   for i in 0..<args.len:
     if i > 0: result.add " "
     result.add hostQuoteShell(args[i])
+
+proc hostIsAbsolute(path: string): bool =
+  ## Checks whether a given `path` is absolute.
+
+  if len(path) == 0: return false
+
+  if windowsHost:
+    var len = len(path)
+    result = (path[0] in {'/', '\\'}) or
+              (len > 1 and path[0] in {'a'..'z', 'A'..'Z'} and path[1] == ':')
+  else:
+    result = isAbsolute(path)
+
+proc hostAbsolutePath*(path: string, root = getCurrentDir()): string =
+  ## Returns the absolute path of `path`, rooted at `root` (which must be absolute;
+  ## default: current directory).
+  ## If `path` is absolute, return it, ignoring `root`.
+
+  if hostIsAbsolute(path): path
+  else:
+    if not root.hostisAbsolute:
+      raise newException(ValueError, "The specified root is not absolute: " & root)
+    joinPath(root, path)
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -539,10 +563,10 @@ macro importc*(imports: varargs[untyped]): untyped =
       of "undef":
         defs = nnkInfix.newTree("&".ident, defs, newLit("#undef " & node[1].strVal & "\n"))
       of "path":
-        cargs.add superQuote do: "-I" & absolutePath(`node[1]`, getProjectPath())
-        importDirs.add superQuote do: absolutePath(`node[1]`, getProjectPath())
+        cargs.add superQuote do: "-I" & hostAbsolutePath(`node[1]`, getProjectPath())
+        importDirs.add superQuote do: hostAbsolutePath(`node[1]`, getProjectPath())
       of "syspath":
-        cargs.add superQuote do: "-I" & absolutePath(`node[1]`, getProjectPath())
+        cargs.add superQuote do: "-I" & hostAbsolutePath(`node[1]`, getProjectPath())
         sysPathDefined = true
       of "compilerarg":
         cargs.add node[1]
@@ -574,7 +598,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     else: error "Unknown argument passed to importc: " & $node.repr
   for path in syspaths.split(":"):
     if path != "":
-      cargs.add superQuote do: "-I" & absolutePath(`path`, getProjectPath())
+      cargs.add superQuote do: "-I" & hostAbsolutePath(`path`, getProjectPath())
       sysPathDefined = true
   if not sysPathDefined:
     let clangIncludePath = getClangIncludePath()
@@ -633,7 +657,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       staticRead(opirCache)
     else:
       # Required for gorgeEx()/staticExec() to "act" like cmd.exe
-      let cmdPrefix = when windowsHost: "cmd /c " else: ""
+      let cmdPrefix = if windowsHost: "cmd /c " else: ""
       discard staticExec(cmdPrefix & "mkdir " & fname.parentDir.hostQuoteShell())
       writeFile(fname, defs)
       hint "Running: " & cmdPrefix & cmd
