@@ -33,6 +33,23 @@ const
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
 
+const buildOS {.strdefine.} = hostOS
+const windowsHost = buildOS == "windows"
+
+func hostQuoteShell(s: string): string =
+  ## Quote ``s``, so it can be safely passed to shell.
+  when windowsHost:
+    result = quoteShellWindows(s)
+  else:
+    result = quoteShellPosix(s)
+
+proc hostQuoteShellCommand(args: openArray[string]): string =
+  ## Concatenates and quotes shell arguments `args`.
+  result = ""
+  for i in 0..<args.len:
+    if i > 0: result.add " "
+    result.add hostQuoteShell(args[i])
+
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
 proc exportMark(n: NimNode): NimNode =
@@ -569,7 +586,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   let
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & compilerArguments.quoteShellCommand() & " " & fname.quoteShell()
+    cmd = "opir " & compilerArguments.hostQuoteShellCommand() & " " & fname.hostQuoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
@@ -602,10 +619,10 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       staticRead(opirCache)
     else:
       # Required for gorgeEx()/staticExec() to "act" like cmd.exe
-      let cmdPrefix = when defined(windows): "cmd /c " else: ""
-      discard staticExec(cmdPrefix & "mkdir " & fname.parentDir.quoteShell())
+      let cmdPrefix = when windowsHost: "cmd /c " else: ""
+      discard staticExec(cmdPrefix & "mkdir " & fname.parentDir.hostQuoteShell())
       writeFile(fname, defs)
-      hint "Running: " & cmd
+      hint "Running: " & cmdPrefix & cmd
       let opirRes = gorgeEx(cmdPrefix & cmd)
       if opirRes.exitCode != 0:
         var err = "Opir exited with non-zero exit code $1." % $opirRes.exitCode
