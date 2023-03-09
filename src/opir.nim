@@ -245,7 +245,7 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   if name.startsWith("enum "):
     name = "enum_" & name[len("enum ")..^1]
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
-  if enumdecl.Cursor_isAnonymous == 0:
+  if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
   discard visitChildren(enumDecl, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
     var mainObj = cast[ptr JsonNode](clientData)
