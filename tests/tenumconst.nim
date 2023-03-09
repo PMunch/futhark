@@ -2,7 +2,6 @@ import "../src/futhark"
 
 importc:
   path "."
-  compilerArg "-fno-short-enums"
   "tenumconst.h"
 
 
