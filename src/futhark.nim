@@ -719,13 +719,13 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     # This triggers an error in the example, it needs to be compiled twice for it to work
     #if node["kind"].str == "const":
     #  state.used.incl node["name"].str
-    var nodefile = node["file"].str
+    var nodeSourceFile = node["file"].str
     if not defined(windows) and windowsHost:
-      nodefile = nodefile.replace('\\', DirSep)
-    var shouldImport = nodefile in extraFiles
+      nodeSourceFile = nodeSourceFile.replace('\\', DirSep)
+    var shouldImport = nodeSourceFile in extraFiles
     if not shouldImport:
       for file in files:
-        if nodefile.endsWith file:
+        if nodeSourceFile.endsWith file:
           shouldImport = true
           break
     if shouldImport:
