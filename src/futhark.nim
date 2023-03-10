@@ -1,6 +1,9 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils
 import macroutils except Lit
 
+# import doesn't work for nimbleutils
+include pkg/nimbleutils
+
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
   builtins = ["addr", "and", "as", "asm",
@@ -31,7 +34,7 @@ const
   futharkRebuild = defined(futharkRebuild) or opirRebuild
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
-  VERSION = block:
+  futharkVersion = block:
     # source style, go up one dir
     var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
     if not fileExists(nimblePath):
@@ -40,7 +43,11 @@ const
     if not fileExists(nimblePath):
       # try find by name
       nimblePath = "futhark"
-    staticExec("nimble dump --json " & nimblePath.quoteShell()).parseJson()["version"].getStr()
+    try:
+      $getPackage(nimblePath).version
+    except CatchableError:
+      warning "Couldn't find futhark version from 'nimble dump " & nimblePath & "'"
+      "unknown"
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -579,7 +586,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
     cmd = "opir " & compilerArguments.join(" ") & " " & fname
-    opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
+    opirHash = hash(defs) !& hash(cmd) !& hash(futharkVersion)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
     fullHash = !$(hash(nodeclguards) !& hash(noopaquetypes) !& hash(exportall) !&
