@@ -32,7 +32,7 @@ const
   futharkRebuild = defined(futharkRebuild) or opirRebuild
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
-  futharkVersion = block:
+  VERSION = block:
     # source style, go up one dir
     var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
     if not fileExists(nimblePath):
@@ -584,7 +584,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
     cmd = "opir " & compilerArguments.join(" ") & " " & fname
-    opirHash = hash(defs) !& hash(cmd) !& hash(futharkVersion)
+    opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
     fullHash = !$(hash(nodeclguards) !& hash(noopaquetypes) !& hash(exportall) !&
