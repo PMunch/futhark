@@ -1,8 +1,6 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils
 import macroutils except Lit
-
-# import doesn't work for nimbleutils
-include pkg/nimbleutils
+import pkg/nimbleutils
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
