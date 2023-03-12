@@ -2,7 +2,7 @@ import "../src/futhark"
 
 importc:
   path "."
-  compilerArg "-fshort-enums" # doesn't work on windows
+  compilerArg when not defined(windows): "-fshort-enums" else: ""
   "tenumconst.h"
 
 
