@@ -2,6 +2,7 @@ import "../src/futhark"
 
 importc:
   path "."
+  compilerArg "-fshort-enums" # doesn't work on windows
   "tenumconst.h"
 
 
@@ -14,15 +15,23 @@ doAssert MY_VAR_E.ord == 0
 doAssert MY_VAR_D == MY_VAR_B
 doAssert MY_VAR_E == MY_VAR_A
 
-
 doAssert ANON_A == 0
 doAssert ANON_B == 1
 doAssert ANON_C == -1
 
-doAssert sizeof(ANON_D) == sizeof(cint)
+when not defined(windows):
+  doAssert sizeof(ANON_D) == 1
+else:
+  doAssert sizeof(ANON_D) == sizeof(cint)
 
-doAssert sizeof(SHORT) == sizeof(cint)
+when not defined(windows):
+  doAssert sizeof(SHORT) == 2
+else:
+  doAssert sizeof(SHORT) == sizeof(cint)
 doAssert SHORT.ord == 0x7fff
 
-doAssert sizeof(WORD) == sizeof(cint)
+when not defined(windows):
+  doAssert sizeof(WORD) == 4
+else:
+  doAssert sizeof(WORD) == sizeof(cint)
 doAssert WORD.ord == 0x7fffffff
