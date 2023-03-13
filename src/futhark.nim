@@ -1,4 +1,4 @@
-import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils
+import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils, pathnorm
 import macroutils except Lit
 import pkg/nimbleutils
 
@@ -47,16 +47,17 @@ const
       warning "Couldn't find futhark version from 'nimble dump " & nimblePath & "'"
       "unknown"
 
+# This is to allow cross-compilation to non-windows targets on windows
 when not declared(buildOS):
   const buildOS {.magic: "BuildOS".}: string = hostOS
 const windowsHost = buildOS == "windows"
 
 func hostQuoteShell(s: string): string =
   ## Quote ``s``, so it can be safely passed to shell.
-  if windowsHost:
+  when not defined(windows) and windowsHost:
     result = quoteShellWindows(s)
   else:
-    result = quoteShellPosix(s)
+    result = quoteShell(s)
 
 proc hostQuoteShellCommand(args: openArray[string]): string =
   ## Concatenates and quotes shell arguments `args`.
@@ -65,28 +66,56 @@ proc hostQuoteShellCommand(args: openArray[string]): string =
     if i > 0: result.add " "
     result.add hostQuoteShell(args[i])
 
+template endsWith(a: string, b: set[char]): bool =
+  a.len > 0 and a[^1] in b
+
+proc hostJoinPathImpl(result: var string, state: var int, tail: string) =
+  let trailingSep = tail.endsWith({'\\', DirSep, AltSep}) or tail.len == 0 and result.endsWith({'\\', DirSep, AltSep})
+  normalizePathEnd(result, trailingSep=false)
+  addNormalizePath(tail, result, state, '\\')
+  normalizePathEnd(result, trailingSep=trailingSep)
+
+proc hostJoinPath(head, tail: string): string =
+  ## Joins two directory names to one.
+  ##
+  ## returns normalized path concatenation of `head` and `tail`, preserving
+  ## whether or not `tail` has a trailing slash (or, if tail if empty, whether
+  ## head has one).
+  ##
+  ## See also:
+  ## * `joinPath(varargs) proc <#joinPath,varargs[string]>`_
+  ## * `/ proc <#/,string,string>`_
+  ## * `splitPath proc <#splitPath,string>`_
+  ## * `uri.combine proc <uri.html#combine,Uri,Uri>`_
+  ## * `uri./ proc <uri.html#/,Uri,string>`_
+  when not defined(windows) and windowsHost:
+    joinPath(head, tail)
+  else:
+    result = newStringOfCap(head.len + tail.len)
+    var state = 0
+    hostJoinPathImpl(result, state, head)
+    hostJoinPathImpl(result, state, tail)
+
 proc hostIsAbsolute(path: string): bool =
   ## Checks whether a given `path` is absolute.
-
   if len(path) == 0: return false
 
-  if windowsHost:
+  when not defined(windows) and windowsHost:
     var len = len(path)
     result = (path[0] in {'/', '\\'}) or
               (len > 1 and path[0] in {'a'..'z', 'A'..'Z'} and path[1] == ':')
   else:
     result = isAbsolute(path)
 
-proc hostAbsolutePath*(path: string, root = getCurrentDir()): string =
+proc hostAbsolutePath(path: string, root = getCurrentDir()): string =
   ## Returns the absolute path of `path`, rooted at `root` (which must be absolute;
   ## default: current directory).
   ## If `path` is absolute, return it, ignoring `root`.
-
   if hostIsAbsolute(path): path
   else:
     if not root.hostisAbsolute:
       raise newException(ValueError, "The specified root is not absolute: " & root)
-    joinPath(root, path)
+    hostJoinPath(root, path)
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -569,7 +598,9 @@ macro importc*(imports: varargs[untyped]): untyped =
         cargs.add superQuote do: "-I" & hostAbsolutePath(`node[1]`, getProjectPath())
         sysPathDefined = true
       of "compilerarg":
-        cargs.add node[1]
+        # ignore empty string
+        if node[1].kind in Stringable and node[1].strVal != "":
+          cargs.add node[1]
       of "rename":
         let
           f = if node[1].kind in Stringable: node[1].strVal else: node[1].repr
@@ -657,7 +688,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       staticRead(opirCache)
     else:
       # Required for gorgeEx()/staticExec() to "act" like cmd.exe
-      let cmdPrefix = if windowsHost: "cmd /c " else: ""
+      let cmdPrefix = when windowsHost: "cmd /c " else: ""
       discard staticExec(cmdPrefix & "mkdir " & fname.parentDir.hostQuoteShell())
       writeFile(fname, defs)
       hint "Running: " & cmdPrefix & cmd
@@ -720,7 +751,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     #if node["kind"].str == "const":
     #  state.used.incl node["name"].str
     var nodeSourceFile = node["file"].str
-    if not defined(windows) and windowsHost:
+    # uniform paths when cross-compiling
+    when not defined(windows) and windowsHost:
       nodeSourceFile = nodeSourceFile.replace('\\', DirSep)
     var shouldImport = nodeSourceFile in extraFiles
     if not shouldImport:
