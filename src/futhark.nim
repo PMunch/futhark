@@ -75,12 +75,12 @@ proc hostJoinPath(head, tail: string): string =
   ## * `uri.combine proc <uri.html#combine,Uri,Uri>`_
   ## * `uri./ proc <uri.html#/,Uri,string>`_
   when not defined(windows) and windowsHost:
-    joinPath(head, tail)
-  else:
     result = newStringOfCap(head.len + tail.len)
     var state = 0
     hostJoinPathImpl(result, state, head)
     hostJoinPathImpl(result, state, tail)
+  else:
+    joinPath(head, tail)
 
 proc hostIsAbsolute(path: string): bool =
   ## Checks whether a given `path` is absolute.
@@ -584,9 +584,7 @@ macro importc*(imports: varargs[untyped]): untyped =
         cargs.add superQuote do: "-I" & hostAbsolutePath(`node[1]`, getProjectPath())
         sysPathDefined = true
       of "compilerarg":
-        # ignore empty string
-        if node[1].kind in Stringable and node[1].strVal != "":
-          cargs.add node[1]
+        cargs.add node[1]
       of "rename":
         let
           f = if node[1].kind in Stringable: node[1].strVal else: node[1].repr
@@ -641,7 +639,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   let
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & compilerArguments.hostQuoteShellCommand() & " " & fname.hostQuoteShell()
+    cmd = "opir " & compilerArguments.filter(proc(x: string): bool = x != "").hostQuoteShellCommand() & " " & fname.hostQuoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
@@ -675,7 +673,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     else:
       # Required for gorgeEx()/staticExec() to "act" like cmd.exe
       let cmdPrefix = when windowsHost: "cmd /c " else: ""
-      discard staticExec(cmdPrefix & "mkdir " & fname.parentDir.hostQuoteShell())
+      discard staticExec(cmdPrefix & "mkdir -p " & fname.parentDir.hostQuoteShell())
       writeFile(fname, defs)
       hint "Running: " & cmdPrefix & cmd
       let opirRes = gorgeEx(cmdPrefix & cmd)
