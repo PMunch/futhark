@@ -72,7 +72,7 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_Pointer:
     let info = ct.getPointerInfo
     var kind = info.baseType.kind
-    if info.baseType.kind == CXType_Typedef:
+    if kind == CXType_Typedef:
       kind = info.baseType.getTypeDeclaration.getTypedefDeclUnderlyingType.kind
     if info.depth == 1 and kind in {CXType_Char_S, CXType_SChar}:
       %*{"kind": "base", "value": "cstring"}
