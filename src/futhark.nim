@@ -51,6 +51,7 @@ const
 when not declared(buildOS):
   const buildOS {.magic: "BuildOS".}: string = hostOS
 const windowsHost = buildOS == "windows"
+const cmdPrefix = when windowsHost: "cmd /c " else: ""
 
 func hostQuoteShell(s: string): string =
   ## Quote ``s``, so it can be safely passed to shell.
@@ -686,7 +687,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       staticRead(opirCache)
     else:
       # Required for gorgeEx()/staticExec() to "act" like cmd.exe
-      let cmdPrefix = when windowsHost: "cmd /c " else: ""
       discard staticExec(cmdPrefix & "mkdir -p " & fname.parentDir.hostQuoteShell())
       writeFile(fname, defs)
       hint "Running: " & cmdPrefix & cmd
@@ -876,4 +876,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
 
   # Cache results
   hint "Caching Futhark output in " & futharkCache
+  if not dirExists(futharkCache.parentDir):
+    discard staticExec(cmdPrefix & "mkdir -p " & futharkCache.parentDir.hostQuoteShell())
   writeFile(futharkCache, result.repr)
