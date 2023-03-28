@@ -352,8 +352,11 @@ get fixed up over time.
 To install Futhark you first need to have clang installed. Installing clang on
 Linux is as simple as just grabbing it from your package manager (e.g. `sudo
 apt install libclang-dev`). To install clang on Windows you need to install
-[LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-15.0.6) (you
-probably want to grab the `LLVM-15.0.6-win64.exe` version).
+[LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-15.0.7) (you
+probably want to grab the `LLVM-15.0.7-win64.exe` version). To install clang on
+macOS, run `xcode-select --install` in the terminal. Opir should then detect
+it automatically. Have a look at [opir.nims](src/opir.nims) if you're
+curious how the Windows and macOS detection works.
 
 If you have Clang installed in your system path you can now simply run:
 ```
@@ -369,9 +372,6 @@ machines) lives in to the linker:
 nimble install --passL:"-L<path to lib directory containing libclang.so file>" futhark
 #e.g.: nimble install --passL:"-L/usr/lib/llvm-6.0/lib" futhark
 ```
-
-If you have OSX build instructions please open an issue and explain the process,
-even if it is the same as for Linux, just in order to add it as a note.
 
 ## TODO
 - Proper handling of C macros (inherently hard because C macros are typeless)
