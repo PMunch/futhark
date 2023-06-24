@@ -148,13 +148,13 @@ C type.
 ## Compatibility features and readability
 Futhark by default tries to ensure the highest amount of compatibility with
 pre-wrapped libraries (e.g. the `posix` standard library module) and other user
-code. Because of this the output which Futhark generates isn't very easy to
-read, being littered with `when defined` statements and weird numbered
+code. Because of this the output which Futhark generates isn't very pretty,
+being littered with `when defined` statements and weird numbered
 identifiers for renaming things. These features are intended to make Futhark
 easier to use in a mostly automatic fashion, but you might not need them. If
 you want to read the generated output, build documentation of a Futhark
 generated module, or possibly get an improved editor experience you might want
-to disable some of these features.
+to disable some of these features for a prettier, more readable output.
 
 There are basically three things you can control with define switches:
 
