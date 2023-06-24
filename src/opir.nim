@@ -234,7 +234,6 @@ proc genStructDecl(struct: CXCursor): JsonNode =
     of CXCursor_FirstAttr: discard # This should really be CXCursor_UnexposedAttr, but that's not exported from the module
     else:
       stderr.writeLine "Unknown element in structure or union: ", field.getCursorKind, " ", field.getLocation()
-      quit(-1)
 
     return CXChildVisitContinue
   , result.addr)
