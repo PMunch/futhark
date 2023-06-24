@@ -232,8 +232,10 @@ proc genStructDecl(struct: CXCursor): JsonNode =
     of CXCursor_AlignedAttr:
       mainObj[]["alignment"] = %parent.getCursorType.Type_getAlignOf()
     of CXCursor_FirstAttr: discard # This should really be CXCursor_UnexposedAttr, but that's not exported from the module
+    of CXCursor_VisibilityAttr: stderr.writeLine "Ignoring visibility attribute on ", mainObj[]["name"]," set to \"", $field.getCursorSpelling, "\": ", field.getLocation()
     else:
       stderr.writeLine "Unknown element in structure or union: ", field.getCursorKind, " ", field.getLocation()
+      quit(-1)
 
     return CXChildVisitContinue
   , result.addr)
