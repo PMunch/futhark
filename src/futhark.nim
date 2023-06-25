@@ -492,8 +492,27 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
     of "external": nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(origName)))
     else: Empty()
   let pragmaExpr = nnkPragmaExpr.newTree(nameIdent.postfix "*", pragmas)
-  state.procs.add nameIdent.declGuard(quote do:
-    var `pragmaExpr`: `typeIdent`)
+  if node.hasKey("value"):
+    let val = node["value"]
+    case val.kind:
+    of JInt:
+      let mval = val.num
+      state.procs.add nameIdent.declGuard(quote do:
+        var `pragmaExpr`: `typeIdent` = `typeIdent`(`mval`))
+    of JFloat:
+      let mval = val.fnum
+      state.procs.add nameIdent.declGuard(quote do:
+        var `pragmaExpr`: `typeIdent` = `typeIdent`(`mval`))
+    of JString:
+      let mval = val.str
+      state.procs.add nameIdent.declGuard(quote do:
+        var `pragmaExpr`: `typeIdent` = `typeIdent`(`mval`))
+    else:
+      state.procs.add nameIdent.declGuard(quote do:
+        var `pragmaExpr`: `typeIdent`)
+  else:
+    state.procs.add nameIdent.declGuard(quote do:
+      var `pragmaExpr`: `typeIdent`)
 
 proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
   let
@@ -520,7 +539,7 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
     if value == nameIdent: return
     let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
     let renamed = state.renamed.getOrDefault(node["type"]["value"].str, node["type"]["value"].str)
-    if (state.typeNameMap.hasKey(renamed) or state.knownValues.contains renamed):
+    if (state.typeNameMap.hasKey(renamed) or state.knownValues.contains renamed) or (state.typeNameMap.hasKey(node["type"]["value"].str) and state.typeNameMap[node["type"]["value"].str].strVal == renamed):
       state.procs.add nameIdent.declGuard(quote do:
         when `value` is typedesc:
           `newConstTypeStmt`

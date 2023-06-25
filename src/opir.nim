@@ -1,4 +1,4 @@
-import strutils, os, json, posix, options, tables
+import strutils, os, json, posix, options, tables, strformat, osproc
 import clang, termstyle
 
 proc `$`(cxstr: CXString): string =
@@ -45,7 +45,7 @@ proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode
 proc toNimType(ct: CXType): JsonNode =
   case ct.kind:
   of CXType_Invalid: %*{"kind": "invalid", "value": "invalid?"}
-  of CXType_Unexposed: %*{"kind": "invalid", "value": "unexposed?"}
+  of CXType_Unexposed: ct.getCanonicalType.toNimType
   of CXType_Void: %*{"kind": "base", "value": "void"}
   of CXType_Bool: %*{"kind": "base", "value": "bool"}
   of CXType_Char_U, CXType_UChar: %*{"kind": "base", "value": "uint8"} # TODO: Difference between Char_U and UChar? cuchar is deprecated, use uint8 instead
@@ -100,15 +100,15 @@ proc toNimType(ct: CXType): JsonNode =
         newJNull()
     else:
       %*{"kind": "base", "value": base}
-  of CXType_Record:
-    #echo $ct.getTypedefName
-    #echo $ct.getTypeDeclaration.getCursorSpelling
-    #%*{"kind": "invalid", "value": "record?"}
-    let value = $ct.getTypeDeclaration.getCursorSpelling
-    if value.len != 0:
-      %*{"kind": "alias", "value": value}
-    else:
-      newJNull()
+  #of CXType_Record:
+  #  #echo $ct.getTypedefName
+  #  #echo $ct.getTypeDeclaration.getCursorSpelling
+  #  #%*{"kind": "invalid", "value": "record?"}
+  #  let value = $ct.getTypeDeclaration.getCursorSpelling
+  #  if value.len != 0:
+  #    %*{"kind": "alias", "value": value}
+  #  else:
+  #    newJNull()
   of CXType_LValueReference, CXType_RValueReference, CXType_ObjCInterface, CXType_ObjCObjectPointer: %*{"kind": "invalid", "value": "???"}
   of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
   of CXType_FunctionProto, CXType_FunctionNoProto:
@@ -118,7 +118,7 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_IncompleteArray:
     %*{"kind": "array", "value": ct.getElementType.toNimType}
   of CXType_Vector, CXType_VariableArray, CXType_DependentSizedArray: %*{"kind": "invalid", "value": "array?"}
-  of CXType_Elaborated:
+  of CXType_Elaborated, CXType_Record:
     let typeDecl = ct.getTypeDeclaration
     let value = $typeDecl.getCursorSpelling
     if value.len != 0:
@@ -148,7 +148,9 @@ var
   index = createIndex(0, 0)
   commandLine = allocCStringArray(commandLineParams())
   args = 0
-  fname = getTempDir() / "imports-" & $getPid() & ".h"
+  tmpDir = getTempDir() / "opir-" & $getPid()
+  fname = tmpDir / "imports.h"
+createDir(tmpDir)
 while commandLineParams()[args].startsWith "-": inc args
 
 try:
@@ -262,7 +264,20 @@ proc genVarDecl(vardecl: CXCursor): JsonNode =
     of CXLinkage_Internal: "internal"
     of CXLinkage_UniqueExternal: "unique"
     of CXLinkage_External: "external" # This is C `extern`
-  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": $varDecl.getCursorSpelling, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
+  result = %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": $varDecl.getCursorSpelling, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
+  let eval = varDecl.CursorEvaluate()
+  case eval.EvalResult_getKind:
+  of CXEval_int:
+    if eval.EvalResult_isUnsignedInt != 0:
+      result["value"] = %(eval.EvalResult_getAsUnsigned)
+    else:
+      result["value"] = %(eval.EvalResult_getAsLongLong)
+  of CXEval_float:
+    result["value"] = %(eval.EvalResult_getAsDouble)
+  of CXEval_strLiteral:
+    result["value"] = %($eval.EvalResult_getAsStr)
+  else: discard
+  eval.EvalResult_dispose()
 
 proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
   let retType = funcDeclType.getResultType
@@ -324,6 +339,32 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
     if macroDef.CursorIsMacroFunctionLike == 0:
       let fname = $file.getFileName
       if fname.len != 0:
+        let
+          tmpFile = tmpDir / "macroexpand.h"
+          macroExpander = fmt"""
+#include "{fname}"
+//typedef typeof({name}) t;
+typeof({name}) v = {name};
+"""
+        let lastFile = paramStr(paramCount()).expandFilename
+        # Crude check to avoid recursion
+        if lastFile.splitPath.head.startsWith(getTempDir() / "opir-") and
+          lastFile.splitPath.tail == "macroexpand.h":
+          return
+        writeFile(tmpFile, macroexpander)
+        var params = commandLineParams()
+        params[^1] = tmpFile
+        let childCommand = getAppFilename() & " " & params.join(" ")
+        let (output, code) = execCmdEx(childCommand, options = {poUsePath})
+        if code == 0:
+          let returnedData = parseJson(output)
+          if returnedData.len != 1:
+            stderr.writeLine red "Invalid output: ", " too many entries returned"
+          else:
+            if returnedData[0].hasKey("value"):
+              return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": returnedData[0]["value"], "type": returnedData[0]["type"]}
+            else:
+              return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": returnedData[0]["type"]}
         let def = block:
           let def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
           if def.len > 1:
@@ -379,38 +420,58 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
 var cursor = getTranslationUnitCursor(unit)
 
 var output = newJArray()
-discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
-  var decl =
-    case c.getCursorKind:
-    of CXCursor_TypedefDecl:
-      c.genTypedefDecl()
-    of CXCursor_StructDecl, CXCursor_UnionDecl:
-      let struct = c.genStructDecl()
-      if struct["fields"].len != 0:
-        struct
-      else: nil
-    of CXCursor_FunctionDecl:
-      c.genProcDecl()
-    of CXCursor_EnumDecl:
-      c.genEnumDecl()
-    of CXCursor_VarDecl:
-      c.genVarDecl()
-    of CXCursor_MacroDefinition:
-      c.genMacroDecl()
-    of CXCursor_MacroExpansion:
-      nil
-    of CXCursor_InclusionDirective:
-      # This could potentially be used to give more context for definitions
-      nil
-    else:
-      # Unknown cursor kind
-      stderr.writeLine yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "' at original position: ", getLocation(c)
-      nil
-  if decl != nil:
-    output.add decl
-  return CXChildVisitContinue
-, nil
-)
+
+let lastFile = paramStr(paramCount()).expandFilename
+if lastFile.splitPath.head.startsWith(getTempDir() / "opir-") and
+  lastFile.splitPath.tail == "macroexpand.h":
+  discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
+    if c.getLocation.filename == lastFile:
+      var decl =
+        case c.getCursorKind:
+        of CXCursor_TypedefDecl:
+          c.genTypedefDecl()
+        of CXCursor_VarDecl:
+          c.genVarDecl()
+        else:
+          nil
+      if decl != nil:
+        output.add decl
+    return CXChildVisitContinue
+  , nil
+  )
+else:
+  discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
+    var decl =
+      case c.getCursorKind:
+      of CXCursor_TypedefDecl:
+        c.genTypedefDecl()
+      of CXCursor_StructDecl, CXCursor_UnionDecl:
+        let struct = c.genStructDecl()
+        if struct["fields"].len != 0:
+          struct
+        else: nil
+      of CXCursor_FunctionDecl:
+        c.genProcDecl()
+      of CXCursor_EnumDecl:
+        c.genEnumDecl()
+      of CXCursor_VarDecl:
+        c.genVarDecl()
+      of CXCursor_MacroDefinition:
+        c.genMacroDecl()
+      of CXCursor_MacroExpansion:
+        nil
+      of CXCursor_InclusionDirective:
+        # This could potentially be used to give more context for definitions
+        nil
+      else:
+        # Unknown cursor kind
+        stderr.writeLine yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "' at original position: ", getLocation(c)
+        nil
+    if decl != nil:
+      output.add decl
+    return CXChildVisitContinue
+  , nil
+  )
 
 for elem in output:
   if not (elem.hasKey("kind") and elem.hasKey("file")):
@@ -422,4 +483,4 @@ echo output
 
 disposeTranslationUnit(unit)
 disposeIndex(index)
-removeFile(fname)
+removeDir(tmpDir)
