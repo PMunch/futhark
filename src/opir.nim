@@ -324,13 +324,28 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
     if macroDef.CursorIsMacroFunctionLike == 0:
       let fname = $file.getFileName
       if fname.len != 0:
+        var kind = "unknown"
         let def = block:
-          let def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
+          var def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
           if def.len > 1:
+            # stdint.h macro parser: INT8_C(-5), UINT32_C(123) for example
+            let ucpPos = def.find("_C(")
+            if ucpPos > 3 and def[^1] == ')':
+              let unsignedOffset = if def[0] == 'U': 1 else: 0
+              if def.continuesWith("INT", unsignedOffset):
+                let size = def[unsignedOffset + 3 .. ucpPos - 1]
+                if size in ["8", "16", "32", "64"]:
+                  def = def[unsignedOffset + 3 + size.len + 3 .. ^2].strip
+                  if unsignedOffset == 1:
+                    def.add "U"
+                  if size == "8": kind = if unsignedOffset == 0: "int8" else: "uint8"
+                  if size == "32": def.add "L"
+                  if size == "64": def.add "LL"
+
             if def[0] == '(' and def[^1] == ')': def[1..^2].strip
             else: def
           else: def
-        template parseReturn(x, defIn: untyped): untyped =
+        template parseReturn(x, defIn: untyped; kindIn: string): untyped =
           let def = defIn
           try:
             var
@@ -347,9 +362,11 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
               else: discard
               dec pos
             let
-              value = `parse x`(def[0..pos])
+              value = `parse x`(def[0..pos]) # calls parseInt, parseHexInt...
               kind =
-                if unsigned or long or size:
+                if kindIn != "unknown":
+                  %*{"kind":"base", "value": kindIn}
+                elif unsigned or long or size:
                   %*{"kind":"base", "value": ("c" & (if unsigned: "u" else: "") & (if long or size: (if long: (if longlong: "longlong" else: "long") else: "size") else: "int"))}
                 else:
                   %*{"kind":"unknown"}
@@ -358,14 +375,14 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
         if def.len == 0: return nil
         case def[0]:
         of '0':
-          if def.len == 1: parseReturn(Int, def)
+          if def.len == 1: parseReturn(BiggestInt, def, kind)
           case def[1]:
-          of 'x', 'X': parseReturn(HexInt, def.replace("'", ""))
-          of 'b', 'B': parseReturn(BinInt, def.replace("'", ""))
-          of '1'..'9': parseReturn(OctInt, def[1..^1].replace("'", ""))
-          of 'u', 'U', 'l', 'L', 'z', 'Z': parseReturn(Int, def)
+          of 'x', 'X': parseReturn(HexInt, def.replace("'", ""), kind)
+          of 'b', 'B': parseReturn(BinInt, def.replace("'", ""), kind)
+          of '1'..'9': parseReturn(OctInt, def[1..^1].replace("'", ""), kind)
           else: discard
-        of '-', '1'..'9': parseReturn(Int, def.replace("'", ""))
+        of '-': parseReturn(BiggestInt, def.replace("'", ""), kind)
+        of '1'..'9': parseReturn(BiggestInt, def.replace("'", ""), kind); parseReturn(BiggestUInt, def.replace("'", ""), kind)
         else: discard
         # TODO; Look at already defined stuff and ensure this is not a type
         if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}) and def[0] notin '0'..'9':

@@ -159,6 +159,13 @@ type
     renameCallback: RenameCallback
     forwards: seq[Forward]
 
+proc isUnsignedNumber(x: string): bool =
+  try:
+    discard parseBiggestUInt(x)
+    result = true
+  except ValueError:
+    result = false
+
 proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
   result = origName
   if not renameCallback.isNil:
@@ -512,6 +519,9 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
         else: return
       elif node["value"].kind == JInt:
         nnkCast.newTree(node["type"].toNimType(state), newLit(node["value"].num))
+      elif node["value"].kind == JString and isUnsignedNumber(node["value"].str):
+        # number did not fit in JInt so it was parsed as JString (uint64)
+        nnkCast.newTree(node["type"].toNimType(state), newLit(parseUInt(node["value"].str)))
       else: return
   let
     newConstValueStmt = parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
