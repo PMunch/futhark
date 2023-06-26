@@ -3,6 +3,7 @@
 // Adapted from usage in the wild:
 // https://github.com/boschsensortec/BME68x-Sensor-API/blob/master/bme68x_defs.h
 
+#define TEST_UINT8_ZERO                    UINT8_C(0)
 #define TEST_UINT8                         UINT8_C(0xff)
 #define TEST_UINT16                        UINT16_C(0xffff)
 #define TEST_UINT32                        UINT32_C(0xffffffff)

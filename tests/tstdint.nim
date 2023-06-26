@@ -4,6 +4,7 @@ importc:
   path "."
   "tstdint.h"
 
+doAssert TEST_UINT8_ZERO == 0'u8.uint8
 doAssert TEST_UINT8  == 0xff'u8.uint8
 doAssert TEST_UINT16 == 0xffff'u16.cuint
 doAssert TEST_UINT32 == 0xffffffff'u32.culong

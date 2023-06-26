@@ -380,6 +380,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
           of 'x', 'X': parseReturn(HexInt, def.replace("'", ""), kind)
           of 'b', 'B': parseReturn(BinInt, def.replace("'", ""), kind)
           of '1'..'9': parseReturn(OctInt, def[1..^1].replace("'", ""), kind)
+          of 'u', 'U', 'l', 'L', 'z', 'Z': parseReturn(BiggestInt, def, kind)
           else: discard
         of '-': parseReturn(BiggestInt, def.replace("'", ""), kind)
         of '1'..'9': parseReturn(BiggestInt, def.replace("'", ""), kind); parseReturn(BiggestUInt, def.replace("'", ""), kind)
