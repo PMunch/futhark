@@ -362,7 +362,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
               else: discard
               dec pos
             let
-              value = `parse x`(def[0..pos]) # calls parseInt, parseHexInt...
+              value = `parse x`(def[0..pos]) # calls parseInt, parseHexInt, parseFloat...
               kind =
                 if kindIn != "unknown":
                   %*{"kind":"base", "value": kindIn}
@@ -373,6 +373,8 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
             return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": value, "type": kind}
           except: discard
         if def.len == 0: return nil
+
+        # Integer parsing
         case def[0]:
         of '0':
           if def.len == 1: parseReturn(BiggestInt, def, kind)
@@ -385,6 +387,13 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
         of '-': parseReturn(BiggestInt, def.replace("'", ""), kind)
         of '1'..'9': parseReturn(BiggestInt, def.replace("'", ""), kind); parseReturn(BiggestUInt, def.replace("'", ""), kind)
         else: discard
+
+        # Float parsing
+        if def.contains('.'):
+          if def.endsWith('f') or def.endsWith('F') or def.endsWith('l') or def.endsWith('L'):
+            parseReturn(Float, def.replace("'", "")[0..^2], kind)
+          else:
+            parseReturn(Float, def.replace("'", ""), kind)
         # TODO; Look at already defined stuff and ensure this is not a type
         if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}) and def[0] notin '0'..'9':
           return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": {"kind": "alias", "value": def}}

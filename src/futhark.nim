@@ -516,6 +516,10 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
           let intNode = newNimNode(nnkIntLit)
           intNode.intVal = node["value"].num
           intNode
+        elif node["value"].kind == JFloat:
+          let floatNode = newNimNode(nnkFloatLit)
+          floatNode.floatVal = node["value"].fnum
+          floatNode
         else: return
       elif node["value"].kind == JInt:
         nnkCast.newTree(node["type"].toNimType(state), newLit(node["value"].num))
