@@ -390,7 +390,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
 
         # Float parsing
         if def.contains('.'):
-          if def.endsWith('f') or def.endsWith('F') or def.endsWith('l') or def.endsWith('L'):
+          if def[^1] in ['f', 'F', 'l', 'L']:
             parseReturn(Float, def.replace("'", "")[0..^2], kind)
           else:
             parseReturn(Float, def.replace("'", ""), kind)
