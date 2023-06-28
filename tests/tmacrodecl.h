@@ -7,6 +7,7 @@
 #define TEST_PLAIN_FLOAT_3                 (123.f)
 #define TEST_PLAIN_FLOAT_4                 (-.0f)
 #define TEST_PLAIN_FLOAT_5                 (-0.f)
+#define TEST_PLAIN_FLOAT_6                 (0.0f)
 
 #define TEST_PLAIN_DOUBLE_1                (123.0)
 
