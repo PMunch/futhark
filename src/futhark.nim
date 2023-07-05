@@ -32,6 +32,7 @@ const
   futharkRebuild = defined(futharkRebuild) or opirRebuild
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
+  generateInline = defined(generateInline)
   VERSION = block:
     # source style, go up one dir
     var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
@@ -456,7 +457,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
   state.types.add newType
 
 proc createProc(origName: string, node: JsonNode, state: var State) =
-  if node["inlined"].getBool: return
+  if node["inlined"].getBool and not generateInline: return
   let nameIdent = state.renamed[origName].ident
   var
     def = node.toNimType(state)
@@ -673,7 +674,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
     fullHash = !$(hash(nodeclguards) !& hash(noopaquetypes) !& hash(exportall) !&
-      hash(renames) !& hash(retypes) !& opirHash !&
+      hash(generateInline) !& hash(preAnsiFuncDecl) !& hash(renames) !&
+      hash(retypes) !& opirHash !&
       hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash) !&
       (if forwards.len != 0: forwards.mapIt(hash(it)).foldl(a !& b) else: hash("")) !&
       (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it[0].symBodyHash)).foldl(a !& b) else: hash("")))
@@ -766,6 +768,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     # uniform paths when cross-compiling
     when not defined(windows) and windowsHost:
       nodeSourceFile = nodeSourceFile.replace('\\', DirSep)
+    nodeSourceFile.normalizePath
     var shouldImport = nodeSourceFile in extraFiles
     if not shouldImport:
       for file in files:
