@@ -192,6 +192,12 @@ will be exported as well and documentation will be readable. This is mostly
 useful if you want to export documentation but can't use `nodeclguards` (which
 makes even more readable documentation).
 
+## Inline functions
+When using Futhark with dynamic libraries it doesn't make sense to wrap inline
+functions. However if you are compiling your code directly against some C code
+these might be useful to you. In this case you can pass `-d:generateInline` to
+generate function definitions for inline functions.
+
 ## Pre-ANSI C function declarations
 Also known as K&R style functions. By definition C code like
 ```c
