@@ -11,5 +11,9 @@ elif defined(macosx):
   if libpath.dirExists():
     switch("passL", "-L" & quoteShell(libpath))
     switch("passL", "-Wl,-rpath " & quoteShell(libpath.quoteShell))
+elif defined(linux):
+  const libpath = staticExec("clang -print-resource-dir").strip() / ".." / ".."
+  if (libpath / "libclang.so").fileExists():
+    switch("passL", "-L" & libpath)
 
 switch("passL", "-lclang")
