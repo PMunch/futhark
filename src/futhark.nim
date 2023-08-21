@@ -649,6 +649,14 @@ macro importc*(imports: varargs[untyped]): untyped =
     let clangIncludePath = getClangIncludePath()
     if clangIncludePath != "":
       cargs.add newLit("-I" & clangIncludePath)
+    when defined(macosx):
+      var sdkVersion = getenv("MAC_SDK")
+
+      if sdkVersion == "":
+        sdkVersion = "14"
+      cargs.add newLit("-I/Library/Developer/CommandLineTools/SDKs/MacOSX" &
+       sdkVersion  & ".sdk/usr/include")
+
   result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
 
 proc hash*(n: NimNode): Hash = hash(n.treeRepr)
