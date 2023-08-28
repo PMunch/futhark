@@ -52,7 +52,7 @@ const
 when not declared(buildOS):
   const buildOS {.magic: "BuildOS".}: string = hostOS
 const windowsHost = buildOS == "windows"
-const cmdPrefix = when windowsHost: "cmd /c " else: ""
+const cmdPrefix = when windowsHost: "cmd /E:ON /C " else: ""
 
 func hostQuoteShell(s: string): string =
   ## Quote ``s``, so it can be safely passed to shell.
@@ -118,6 +118,15 @@ proc hostAbsolutePath(path: string, root = getCurrentDir()): string =
     if not root.hostisAbsolute:
       raise newException(ValueError, "The specified root is not absolute: " & root)
     hostJoinPath(root, path)
+
+proc hostCreateDir(dir: string) =
+  # createDir(dir)
+  if dirExists(dir): return
+  when windowsHost:
+    discard staticExec(cmdPrefix & "mkdir " & dir.replace("/", "\\").hostQuoteShell())
+  else:
+    discard staticExec("mkdir -p " & dir.hostQuoteShell())
+  assert dirExists(dir), "Unable to create directory " & dir
 
 template strCmp(node, value: untyped): untyped = node.kind in Stringable and node.strVal == value
 
@@ -703,7 +712,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       staticRead(opirCache)
     else:
       # Required for gorgeEx()/staticExec() to "act" like cmd.exe
-      discard staticExec(cmdPrefix & "mkdir -p " & fname.parentDir.hostQuoteShell())
+      hostCreateDir(fname.parentDir)
       writeFile(fname, defs)
       hint "Running: " & cmdPrefix & cmd
       let opirRes = gorgeEx(cmdPrefix & cmd)
@@ -893,6 +902,5 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
 
   # Cache results
   hint "Caching Futhark output in " & futharkCache
-  if not dirExists(futharkCache.parentDir):
-    discard staticExec(cmdPrefix & "mkdir -p " & futharkCache.parentDir.hostQuoteShell())
+  hostCreateDir(futharkCache.parentDir)
   writeFile(futharkCache, result.repr)
