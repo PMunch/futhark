@@ -43,6 +43,7 @@ proc genStructDecl(struct: CXCursor): JsonNode
 proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode
 
 proc toNimType(ct: CXType): JsonNode =
+  #echo ct.kind
   case ct.kind:
   of CXType_Invalid: %*{"kind": "invalid", "value": "invalid?"}
   of CXType_Unexposed: %*{"kind": "invalid", "value": "unexposed?"}
@@ -74,10 +75,10 @@ proc toNimType(ct: CXType): JsonNode =
     var kind = info.baseType.kind
     if kind == CXType_Typedef:
       kind = info.baseType.getTypeDeclaration.getTypedefDeclUnderlyingType.kind
-    if info.depth == 1 and kind in {CXType_Char_S, CXType_SChar}:
+    let baseType = info.baseType.toNimType
+    if info.depth == 1 and baseType["kind"].str == "base" and baseType["value"].str == "cschar": # in {CXType_Char_S, CXType_SChar}:
       %*{"kind": "base", "value": "cstring"}
     else:
-      let baseType = info.baseType.toNimType
       %*{"kind": "pointer", "depth": info.depth, "base": if baseType.kind != JNull: baseType else: %*{"kind": "base", "value": "void"}}
   of CXType_BlockPointer: %*{"kind": "pointer", "depth": 0}
   of CXType_Typedef:
@@ -121,7 +122,9 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_Elaborated:
     let typeDecl = ct.getTypeDeclaration
     let value = $typeDecl.getCursorSpelling
-    if value.len != 0:
+    if typeDecl.getCursorType.kind == CXType_Typedef:
+      typeDecl.getTypedefDeclUnderlyingType.toNimType
+    elif value.len != 0:
       #echo "Creating alias with name ", value, " to type ", $ct.getTypeDeclaration.getCursorKind
       let prefix = case typeDecl.getCursorKind:
         of CXCursor_StructDecl: "struct_"
@@ -245,6 +248,8 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   let location = getLocation(enumDecl)
   if name.startsWith("enum "):
     name = "enum_" & name[len("enum ")..^1]
+  else:
+    name = "enum_" & name
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
   if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
