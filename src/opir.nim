@@ -228,6 +228,13 @@ proc genStructDecl(struct: CXCursor): JsonNode =
           mainObj[]["fields"].elems[^1]["name"] = %($field.getCursorSpelling)
         else:
           mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
+      of CXType_ConstantArray:
+        var val = %*{"name": $field.getCursorSpelling, "type": field.toNimType}
+        if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name"):
+          val["type"]["value"] = mainObj[]["fields"].elems[^1]["type"]
+          mainObj[]["fields"].elems[^1] = val
+        else:
+          mainObj[]["fields"].add val
       else:
         mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
     of CXCursor_PackedAttr:
