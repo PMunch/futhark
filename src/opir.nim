@@ -118,7 +118,10 @@ proc toNimType(ct: CXType): JsonNode =
     %*{"kind": "array", "size": ct.getNumElements, "value": ct.getElementType.toNimType}
   of CXType_IncompleteArray:
     %*{"kind": "array", "value": ct.getElementType.toNimType}
-  of CXType_Vector, CXType_VariableArray, CXType_DependentSizedArray: %*{"kind": "invalid", "value": "array?"}
+  of CXType_Vector:
+    %*{"kind": "vector"}
+  of CXType_VariableArray, CXType_DependentSizedArray:
+    %*{"kind": "invalid", "value": "array?"}
   of CXType_Elaborated:
     let typeDecl = ct.getTypeDeclaration
     let value = $typeDecl.getCursorSpelling

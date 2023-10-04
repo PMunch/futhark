@@ -210,7 +210,7 @@ proc sanitizeName(state: var State, x: JsonNode): string {.compileTime.} =
 proc findAlias(kind: JsonNode): string =
   case kind["kind"].str:
   of "alias": kind["value"].str
-  of "base", "special": ""
+  of "base", "special", "vector": ""
   of "pointer": findAlias(kind["base"])
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
@@ -257,7 +257,7 @@ proc addUsings(used: var OrderedSet[string], node: JsonNode) =
       used.addUsings(node["base"])
   of "alias":
     used.incl node.findAlias
-  of "enum", "base", "special": discard
+  of "enum", "base", "special", "vector": discard
   of "array":
     used.addUsings(node["value"])
   of "var":
@@ -332,6 +332,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
     of "struct", "union":
       error "Unable to resolve nested struct/union from here"
       "invalidNestedStruct".ident
+    of "vector":
+      nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), newEmptyNode())
     of "special":
       nnkTupleTy.newTree(
         newIdentDefs("low".ident, "uint64".ident),
@@ -841,6 +843,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       of "typedef":
         var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
         newType[0] = state.typeDefMap[node["name"].str].exportMark
+        if node["type"]["kind"].str == "vector":
+          newType[0] = nnkPragmaExpr.newTree(newType[0], nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(node["name"].str))))
         newType[^1] = node["type"].toNimType(state)
         if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
           continue

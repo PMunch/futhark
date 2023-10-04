@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.9.3"
+version       = "0.10.0"
 author        = "PMunch"
 description   = "A package which uses libclang to parse C headers into Nim files for easy interop"
 license       = "MIT"
