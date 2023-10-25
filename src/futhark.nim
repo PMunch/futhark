@@ -61,13 +61,6 @@ func hostQuoteShell(s: string): string =
   else:
     result = quoteShell(s)
 
-proc hostQuoteShellCommand(args: openArray[string]): string =
-  ## Concatenates and quotes shell arguments `args`.
-  result = ""
-  for i in 0..<args.len:
-    if i > 0: result.add " "
-    result.add hostQuoteShell(args[i])
-
 template endsWith(a: string, b: set[char]): bool =
   a.len > 0 and a[^1] in b
 
@@ -619,10 +612,10 @@ macro importc*(imports: varargs[untyped]): untyped =
       of "undef":
         defs = nnkInfix.newTree("&".ident, defs, newLit("#undef " & node[1].strVal & "\n"))
       of "path":
-        cargs.add superQuote do: "-I" & hostAbsolutePath(`node[1]`, getProjectPath())
+        cargs.add superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
         importDirs.add superQuote do: hostAbsolutePath(`node[1]`, getProjectPath())
       of "syspath":
-        cargs.add superQuote do: "-I" & hostAbsolutePath(`node[1]`, getProjectPath())
+        cargs.add superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
         sysPathDefined = true
       of "compilerarg":
         cargs.add node[1]
@@ -680,7 +673,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   let
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & compilerArguments.filter(proc(x: string): bool = x != "").hostQuoteShellCommand() & " " & fname.hostQuoteShell()
+    cmd = "opir " & compilerArguments.join(" ") & " " & fname.hostQuoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
