@@ -124,7 +124,11 @@ proc toNimType(ct: CXType): JsonNode =
     %*{"kind": "invalid", "value": "array?"}
   of CXType_Elaborated:
     let typeDecl = ct.getTypeDeclaration
-    let value = $typeDecl.getCursorSpelling
+    let value = block:
+      var value = $typeDecl.getCursorSpelling
+      if value.len == 0:
+        value = ($typeDecl.getCursorUSR).rsplit('@', 1)[^1]
+      value
     if typeDecl.getCursorType.kind == CXType_Typedef:
       typeDecl.getTypedefDeclUnderlyingType.toNimType
     elif value.len != 0:
