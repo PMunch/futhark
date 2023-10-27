@@ -5,6 +5,9 @@ proc `$`(cxstr: CXString): string =
   result = $getCString(cxstr)
   disposeString(cxstr)
 
+proc getName(cc: CXCursor): string =
+  ($cc.getCursorUSR).rsplit('@', 1)[^1]
+
 proc getPointerInfo(ct: CXType): tuple[depth: int, baseType: CXType] =
   result.baseType = ct
   result.depth = 0
@@ -71,13 +74,20 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_Overload, CXType_Dependent, CXType_ObjCId, CXType_ObjCClass, CXType_ObjCSel, CXType_Float128, CXType_Half, CXType_Float16, CXType_ShortAccum, CXType_Accum,
     CXType_LongAccum, CXType_UShortAccum, CXType_UAccum, CXType_ULongAccum, CXType_Complex: %*{"kind": "invalid", "value": "???"}
   of CXType_Pointer:
-    let info = ct.getPointerInfo
-    var kind = info.baseType.kind
-    if kind == CXType_Typedef:
-      kind = info.baseType.getTypeDeclaration.getTypedefDeclUnderlyingType.kind
-    let baseType = info.baseType.toNimType
-    if info.depth == 1 and baseType["kind"].str == "base" and baseType["value"].str == "cschar": # in {CXType_Char_S, CXType_SChar}:
-      %*{"kind": "base", "value": "cstring"}
+    let
+      info = ct.getPointerInfo
+      kind = info.baseType.kind
+      baseType = info.baseType.toNimType
+      underlyingType =
+        if kind in [CXType_Typedef, CXType_Elaborated]:
+          info.baseType.getTypeDeclaration.getTypedefDeclUnderlyingType.toNimType
+        else:
+          baseType
+    if underlyingType["kind"].str == "base" and underlyingType["value"].str == "cschar": # in {CXType_Char_S, CXType_SChar}:
+      if info.depth == 1:
+        %*{"kind": "base", "value": "cstring"}
+      else:
+        %*{"kind": "pointer", "depth": info.depth - 1, "base": {"kind": "base", "value": "cstring"}}
     else:
       %*{"kind": "pointer", "depth": info.depth, "base": if baseType.kind != JNull: baseType else: %*{"kind": "base", "value": "void"}}
   of CXType_BlockPointer: %*{"kind": "pointer", "depth": 0}
@@ -102,10 +112,7 @@ proc toNimType(ct: CXType): JsonNode =
     else:
       %*{"kind": "base", "value": base}
   of CXType_Record:
-    #echo $ct.getTypedefName
-    #echo $ct.getTypeDeclaration.getCursorSpelling
-    #%*{"kind": "invalid", "value": "record?"}
-    let value = $ct.getTypeDeclaration.getCursorSpelling
+    let value = ct.getTypeDeclaration.getName
     if value.len != 0:
       %*{"kind": "alias", "value": value}
     else:
@@ -124,13 +131,9 @@ proc toNimType(ct: CXType): JsonNode =
     %*{"kind": "invalid", "value": "array?"}
   of CXType_Elaborated:
     let typeDecl = ct.getTypeDeclaration
-    let value = block:
-      var value = $typeDecl.getCursorSpelling
-      if value.len == 0:
-        value = ($typeDecl.getCursorUSR).rsplit('@', 1)[^1]
-      value
+    let value = typeDecl.getName
     if typeDecl.getCursorType.kind == CXType_Typedef:
-      typeDecl.getTypedefDeclUnderlyingType.toNimType
+      typeDecl.getCursorType.toNimType
     elif value.len != 0:
       #echo "Creating alias with name ", value, " to type ", $ct.getTypeDeclaration.getCursorKind
       let prefix = case typeDecl.getCursorKind:
@@ -197,7 +200,7 @@ if unit.isNil or fatal:
 
 proc genTypedefDecl(typedef: CXCursor): JsonNode =
   let
-    name = $typedef.getCursorSpelling
+    name = typedef.getName
     theType = typedef.getTypeDefDeclUnderlyingType.toNimType
     location = typedef.getLocation
   if theType.kind != JNull and not (theType["kind"].str == "alias" and theType["value"].str == name):
@@ -206,16 +209,14 @@ proc genTypedefDecl(typedef: CXCursor): JsonNode =
 proc genEnumDecl(enumdecl: CXCursor): JsonNode
 
 proc genStructDecl(struct: CXCursor): JsonNode =
-  var name = $struct.getCursorType.getTypeSpelling
   let
     location = getLocation(struct)
+    name = "struct_" & struct.getName
     kind =
       if struct.getCursorKind == CXCursor_UnionDecl:
         "union"
       else:
         "struct"
-  if name.startsWith(kind & " "):
-    name = kind & "_" & name[len(kind & " ")..^1]
   result =
     if struct.Cursor_isAnonymous != 0:
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "fields": []}
@@ -232,11 +233,11 @@ proc genStructDecl(struct: CXCursor): JsonNode =
         mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
       of CXType_Elaborated:
         if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name"):
-          mainObj[]["fields"].elems[^1]["name"] = %($field.getCursorSpelling)
+          mainObj[]["fields"].elems[^1]["name"] = %field.getName
         else:
-          mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
+          mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType}
       of CXType_ConstantArray:
-        var val = %*{"name": $field.getCursorSpelling, "type": field.toNimType}
+        var val = %*{"name": field.getName, "type": field.toNimType}
         template innerKind: untyped = mainObj[]["fields"].elems[^1]["type"]["kind"].str
         if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name") and
           startsWith($(field.getCursorType.getElementType.getTypeSpelling), innerKind & " (unnamed " & innerKind & " at"):
@@ -245,13 +246,13 @@ proc genStructDecl(struct: CXCursor): JsonNode =
         else:
           mainObj[]["fields"].add val
       else:
-        mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "type": field.toNimType}
+        mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType}
     of CXCursor_PackedAttr:
       mainObj[]["packed"] = %true
     of CXCursor_AlignedAttr:
       mainObj[]["alignment"] = %parent.getCursorType.Type_getAlignOf()
     of CXCursor_FirstAttr: discard # This should really be CXCursor_UnexposedAttr, but that's not exported from the module
-    of CXCursor_VisibilityAttr: stderr.writeLine "Ignoring visibility attribute on ", mainObj[]["name"]," set to \"", $field.getCursorSpelling, "\": ", field.getLocation()
+    of CXCursor_VisibilityAttr: stderr.writeLine "Ignoring visibility attribute on ", mainObj[]["name"]," set to \"", field.getName, "\": ", field.getLocation()
     else:
       stderr.writeLine "Unknown element in structure or union: ", field.getCursorKind, " ", field.getLocation()
       quit(-1)
@@ -260,18 +261,15 @@ proc genStructDecl(struct: CXCursor): JsonNode =
   , result.addr)
 
 proc genEnumDecl(enumdecl: CXCursor): JsonNode =
-  var name = $enumdecl.getCursorType.getTypeSpelling
-  let location = getLocation(enumDecl)
-  if name.startsWith("enum "):
-    name = "enum_" & name[len("enum ")..^1]
-  else:
-    name = "enum_" & name
+  let
+    location = getLocation(enumDecl)
+    name = "enum_" & enumdecl.getName
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
   if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
   discard visitChildren(enumDecl, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
     var mainObj = cast[ptr JsonNode](clientData)
-    mainObj[]["fields"].add %*{"name": $field.getCursorSpelling, "value": $field.getEnumConstantDeclValue}
+    mainObj[]["fields"].add %*{"name": field.getName, "value": $field.getEnumConstantDeclValue}
     CXChildVisitContinue
   , result.addr)
 
@@ -283,7 +281,7 @@ proc genVarDecl(vardecl: CXCursor): JsonNode =
     of CXLinkage_Internal: "internal"
     of CXLinkage_UniqueExternal: "unique"
     of CXLinkage_External: "external" # This is C `extern`
-  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": $varDecl.getCursorSpelling, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
+  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": varDecl.getName, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
 
 proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
   let retType = funcDeclType.getResultType
@@ -297,10 +295,10 @@ proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
     if kind["kind"].str == "invalid":
       if funcDeclType.getArgType(i).kind == CXType_Elaborated:
         if funcDeclType.getArgType(i).getTypeDeclaration.kind == CXCursor_EnumDecl:
-          kind = %*{"kind": "alias", "value": $funcDeclType.getArgType(i).getTypeDeclaration.getCursorSpelling}
+          kind = %*{"kind": "alias", "value": funcDeclType.getArgType(i).getTypeDeclaration.getName}
     var aname = ""
     if funcDecl.isSome:
-      aname = $funcDecl.get.Cursor_getArgument(i).getCursorSpelling
+      aname = funcDecl.get.Cursor_getArgument(i).getName
     if aname == "":
       aname = "a" & $i
     args.add %*{"name": aname, "type": kind}
@@ -309,7 +307,7 @@ proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
               "variadic": variadic, "proto": funcDeclType.kind == CXType_FunctionProto }
   if funcDecl.isSome:
     let
-      name = $funcDecl.get.getCursorSpelling
+      name = if funcDecl.isSome: funcDecl.get.getName else: ""
       location = getLocation(funcDecl.get)
     result["file"] = %location.filename
     result["position"] = %*{"column": location.column, "line": location.line}
@@ -322,7 +320,7 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
 
 var fileCache: Table[string, string] # TODO: Is there some way to get the macro body so we don't have to do this?
 proc genMacroDecl(macroDef: CXCursor): JsonNode =
-  let name = $macroDef.getCursorSpelling
+  let name = macroDef.getName
   # Hard to get any usable data from this
   # TODO: Figure out handling of macros..
   # Options:
