@@ -88,6 +88,11 @@ proc toNimType(ct: CXType): JsonNode =
         %*{"kind": "base", "value": "cstring"}
       else:
         %*{"kind": "pointer", "depth": info.depth - 1, "base": {"kind": "base", "value": "cstring"}}
+    elif underlyingType["kind"].str == "proc":
+      if info.depth == 1:
+        if baseType.kind != JNull: baseType else: %*{"kind": "base", "value": "void"}
+      else:
+        %*{"kind": "pointer", "depth": info.depth - 1, "base": if baseType.kind != JNull: baseType else: %*{"kind": "base", "value": "void"}}
     else:
       %*{"kind": "pointer", "depth": info.depth, "base": if baseType.kind != JNull: baseType else: %*{"kind": "base", "value": "void"}}
   of CXType_BlockPointer: %*{"kind": "pointer", "depth": 0}
