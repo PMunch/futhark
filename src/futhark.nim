@@ -1,6 +1,7 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils, pathnorm
 import macroutils except Lit
 import pkg/nimbleutils
+import anycase
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
@@ -178,7 +179,13 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
       result = "compiler_" & result[2..^1]
     else:
       result = "internal_" & result[1..^1]
-  result = result.nimIdentNormalize()
+
+  # result = result.nimIdentNormalize()
+  result = case kind:
+    of "enum", "struct", "union", "const", "typedef": result.pascal # AnyCase
+    of "proc", "arg", "enumval", "field": result.camel # anyCase
+    else: result.nimIdentNormalize() # [A|a]nycase
+
   var renamed = false
   if usedNames.contains(result) or result in builtins:
     result.add kind
