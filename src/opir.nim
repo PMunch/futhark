@@ -398,6 +398,10 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
           except: discard
         if def.len == 0: return nil
 
+        # String literal parsing
+        if def[0] == def[^1] and def[0] == '"':
+          return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "value": def[1..^2], "type": {"kind": "base", "value": "cstring"}}
+
         # Integer parsing
         case def[0]:
         of '0':

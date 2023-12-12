@@ -526,11 +526,15 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
           floatNode.floatVal = node["value"].fnum
           floatNode
         else: return
-      elif node["value"].kind == JInt:
-        nnkCast.newTree(node["type"].toNimType(state), newLit(node["value"].num))
-      elif node["value"].kind == JString and isUnsignedNumber(node["value"].str):
-        # number did not fit in JInt so it was parsed as JString (uint64)
-        nnkCast.newTree(node["type"].toNimType(state), newLit(parseUInt(node["value"].str)))
+      elif node["type"]["kind"].str == "base":
+        if node["type"]["value"].str == "cstring":
+          newLit(node["value"].str)
+        elif node["value"].kind == JInt:
+          nnkCast.newTree(node["type"].toNimType(state), newLit(node["value"].num))
+        elif node["value"].kind == JString and isUnsignedNumber(node["value"].str):
+          # number did not fit in JInt so it was parsed as JString (uint64)
+          nnkCast.newTree(node["type"].toNimType(state), newLit(parseUInt(node["value"].str)))
+        else: return
       else: return
   let
     newConstValueStmt = parseStmt("const " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
