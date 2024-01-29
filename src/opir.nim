@@ -188,14 +188,21 @@ deallocCStringArray(commandLine)
 var fatal = false
 for i in 0..<unit.getNumDiagnostics:
   let diagnostic = unit.getDiagnostic(i)
+  var
+    file: CXFile
+    line, column, offset: cuint
+    location = diagnostic.getDiagnosticLocation()
+  location.getExpansionLocation(file.addr, line.addr, column.addr, offset.addr)
+  let position = $file.getFileName & ":" & $line & ":" & $column & " " & $offset
   case diagnostic.getDiagnosticSeverity():
   of CXDiagnostic_Ignored: discard
-  of CXDiagnostic_Note: stderr.writeLine "\t", diagnostic.getDiagnosticSpelling()
-  of CXDiagnostic_Warning: stderr.writeLine yellow "Warning: ", diagnostic.getDiagnosticSpelling()
-  of CXDiagnostic_Error: stderr.writeLine red "Error: ", diagnostic.getDiagnosticSpelling()
+  of CXDiagnostic_Note: stderr.writeLine "\t", diagnostic.getDiagnosticSpelling(), " ", position
+  of CXDiagnostic_Warning: stderr.writeLine yellow "Warning: ", diagnostic.getDiagnosticSpelling(), " ", position
+  of CXDiagnostic_Error: stderr.writeLine red "Error: ", diagnostic.getDiagnosticSpelling(), " ", position
   of CXDiagnostic_Fatal:
-    stderr.writeLine red "Fatal: ", diagnostic.getDiagnosticSpelling()
+    stderr.writeLine red "Fatal: ", diagnostic.getDiagnosticSpelling(), " ", position
     fatal = true
+
 
 if unit.isNil or fatal:
   stderr.writeLine yellow "Tried to parse: ", commandLineParams()[args..^1].join " "
@@ -274,6 +281,7 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   let
     location = getLocation(enumDecl)
     name = "enum_" & enumdecl.getName
+  echo name, ": ", enumdecl.getIntegerType.toNimType
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
   if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
@@ -436,6 +444,12 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
   #  echo "\t", macroDef.getCursorCompletionString.getCompletionChunkKind(i)
   return nil
 
+proc genImportDecl(importdecl: CXCursor): JsonNode =
+  let
+    location = getLocation(importdecl)
+    fincl = $importdecl.getIncludedFile.getFileName()
+  %*{"kind": "import", "file": location.filename, "position": {"column": location.column, "line": location.line}, "import": fincl}
+
 var cursor = getTranslationUnitCursor(unit)
 
 var output = newJArray()
@@ -460,8 +474,7 @@ discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientDat
     of CXCursor_MacroExpansion:
       nil
     of CXCursor_InclusionDirective:
-      # This could potentially be used to give more context for definitions
-      nil
+      c.genImportDecl()
     else:
       # Unknown cursor kind
       stderr.writeLine yellow "Unknown cursor", " '", getCursorSpelling(c), "' of kind '", getCursorKindSpelling(getCursorKind(c)), "' and type '", getTypeSpelling(c.getCursorType), "' at original position: ", getLocation(c)
