@@ -1,6 +1,7 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils, pathnorm
 import macroutils except Lit
 import pkg/nimbleutils
+from system/nimscript import thisDir
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
@@ -146,7 +147,6 @@ type
     name: string
     extraPragmas: seq[string]
   State = object
-    extraImports: HashSet[string]
     entities: OrderedTable[string, JsonNode]
     opaqueTypes: HashSet[string]
     retypes: Table[string, Table[string, NimNode]]
@@ -157,11 +157,27 @@ type
     usedNames: HashSet[string]
     used: OrderedSet[string]
     knownValues: HashSet[string]
-    types: NimNode
-    procs: NimNode
-    extraTypes: NimNode
+    types: Table[string, NimNode]
+    procs: Table[string, NimNode]
+    extraTypes: Table[string, NimNode]
+    explicitImports: Table[string, HashSet[string]]
+    imports: Table[string, HashSet[string]]
     renameCallback: RenameCallback
     forwards: seq[Forward]
+    files: seq[string]
+    currentFile: string
+
+proc addExtraType(state: var State, file: string, node: NimNode) =
+  let file = if file in state.files: file else: ""
+  state.extraTypes.mgetOrPut(file, newStmtList()).add node
+
+proc addType(state: var State, file: string, node: NimNode) =
+  let file = if file in state.files: file else: ""
+  state.types.mgetOrPut(file, newNimNode(nnkTypeSection)).add node
+
+proc addProc(state: var State, file: string, node: NimNode) =
+  let file = if file in state.files: file else: ""
+  state.procs.mgetOrPut(file, newStmtList()).add node
 
 proc isUnsignedNumber(x: string): bool =
   try:
@@ -333,7 +349,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         newIdentDefs("low".ident, "uint64".ident),
         newIdentDefs("high".ident, (if json["value"].str == "uint128": "uint64" else: "int64").ident))
     of "atomic":
-      state.extraImports.incl "std/atomics"
+      state.imports.mgetOrPut(state.currentFile, initHashSet[string]()).incl "std/atomics"
       nnkBracketExpr.newTree("Atomic".ident, json["base"].toNimType(state))
     else:
       warning "Unknown: " & $json
@@ -372,10 +388,10 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
         dummy""")[0][0]
     typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))))
     typedef[2] = enumTy
-    state.extraTypes.add name.declGuard(quote do:
+    state.addExtraType(node["file"].str, name.declGuard(quote do:
       type
-        `name`* {.size: sizeof(`baseType`).} = `enumTy`)
-  state.extraTypes.add consts
+        `name`* {.size: sizeof(`baseType`).} = `enumTy`))
+  state.addExtraType(node["file"].str, consts)
 
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
   let name = block:
@@ -464,7 +480,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     #  else:
     #    warning "Unhandled anonymous field: " & $field
     lastFieldType = fieldType
-  state.types.add newType
+  state.addType node["file"].str, newType
 
 proc createProc(origName: string, node: JsonNode, state: var State) =
   if node["inlined"].getBool and not generateInline: return
@@ -499,7 +515,7 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
     newEmptyNode()
   )
   if echoDef: echo def.repr
-  state.procs.add nameIdent.declGuard(def)
+  state.addProc node["file"].str,  nameIdent.declGuard(def)
 
 proc createVar(origName: string, node: JsonNode, state: var State) =
   let
@@ -510,7 +526,7 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
     of "external": nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(origName)))
     else: Empty()
   let pragmaExpr = nnkPragmaExpr.newTree(nameIdent.postfix "*", pragmas)
-  state.procs.add nameIdent.declGuard(quote do:
+  state.addProc node["file"].str, nameIdent.declGuard(quote do:
     var `pragmaExpr`: `typeIdent`)
 
 proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
@@ -550,7 +566,7 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
     let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
     let renamed = state.renamed.getOrDefault(node["type"]["value"].str, node["type"]["value"].str)
     if (state.typeNameMap.hasKey(renamed) or state.knownValues.contains renamed):
-      state.procs.add nameIdent.declGuard(quote do:
+      state.addProc node["file"].str, nameIdent.declGuard(quote do:
         when `value` is typedesc:
           `newConstTypeStmt`
         else:
@@ -560,11 +576,15 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
             `newLetValueStmt`)
   else:
     state.addKnown origName
-    state.procs.add nameIdent.declGuard(quote do:
+    state.addProc node["file"].str, nameIdent.declGuard(quote do:
       when `value` is static:
         `newConstValueStmt`
       else:
         `newLetValueStmt`)
+
+proc createImport(node: JsonNode, state: var State) =
+  if node["import"].str in state.files and node["file"].str in state.files:
+    state.explicitImports.mgetOrPut(node["file"].str, initHashSet[string]()).incl node["import"].str.relativePath(node["file"].str.parentDir).changeFileExt("")
 
 type
   FromTo = tuple[f, t: string]
@@ -664,8 +684,50 @@ macro importc*(imports: varargs[untyped]): untyped =
     if clangIncludePath != "":
       cargs.add newLit("-I" & hostQuoteShell(clangIncludePath))
   result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
+  echo result.repr
 
 proc hash*(n: NimNode): Hash = hash(n.treeRepr)
+
+proc stripCommonPrefix(strs: var openArray[string]) =
+  var
+    stop = 0
+    lastSlash = 0
+    c: char
+  block check:
+    while true:
+      for i, str in strs:
+        if i == 0:
+          c = str[stop]
+        else:
+          if str.high >= stop and str[stop] != c:
+            break check
+        if i == strs.high and c == DirSep:
+          lastSlash = stop
+      stop += 1
+      if strs[0].high < stop:
+        break
+  for str in strs.mitems:
+    str.delete(0..lastSlash)
+
+proc getCommonPrefix(strs: openArray[string]): string =
+  var
+    stop = 0
+    lastSlash = 0
+    c: char
+  block check:
+    while true:
+      for i, str in strs:
+        if i == 0:
+          c = str[stop]
+        else:
+          if str.high >= stop and str[stop] != c:
+            break check
+        if (i == strs.high and c == DirSep) or str.high == stop:
+          lastSlash = stop
+      stop += 1
+      if strs[0].high < stop:
+        break
+  strs[0][0..lastSlash]
 
 macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], forwards: static[openArray[Forward]]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
@@ -679,11 +741,34 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   ##
   ## See also:
   ## * `importc(varargs[untyped]) <#importc,varargs[untyped]>`_
+  var
+    defs = defs
+    compilerArguments = compilerArguments.toSeq.toHashSet
+    state = State(
+      #types: newNimNode(nnkTypeSection),
+      #procs: newStmtList(),
+      #extraTypes: newStmtList(),
+      renameCallback: renameCallback,
+      forwards: forwards.toSeq)
 
   let
+    projectMode = files.len == 0
+    commonPrefix = importDirs.getCommonPrefix
+    extraFiles = block:
+      var files: HashSet[string]
+      var extraIncludes: HashSet[string]
+      for dir in importDirs:
+        for file in dir.walkDirRec:
+          files.incl file
+          if projectMode and file.splitFile.ext == ".h":
+            defs &= "#include \"" & file & "\"\n"
+            compilerArguments.incl "-I" & file.parentDir
+            extraIncludes.incl file.parentDir
+            state.files.add file
+      files
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & compilerArguments.join(" ") & " " & fname.hostQuoteShell()
+    cmd = "opir " & compilerArguments.toSeq.join(" ") & " " & fname.hostQuoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
@@ -697,15 +782,9 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       elif dirExists(outputPath): outputPath / "futhark_" & fullHash.toHex & ".nim"
       else: outputPath
     opirCache = cacheDir / "opir_" & (!$opirHash).toHex & ".json"
-    extraFiles = block:
-      var files: HashSet[string]
-      for dir in importDirs:
-        for file in dir.walkDirRec:
-          files.incl file
-      files
 
   # Check if everything can be skipped and we can simply include our cached results
-  if fileExists(futharkCache) and not futharkRebuild:
+  if not projectMode and fileExists(futharkCache) and not futharkRebuild:
     hint "Using cached Futhark output: " & futharkCache
     return quote do:
       include `futharkCache`
@@ -752,13 +831,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     writeFile(opirCache, output)
 
   hint "Generating Futhark output"
-  var state = State(
-    types: newNimNode(nnkTypeSection),
-    procs: newStmtList(),
-    extraTypes: newStmtList(),
-    renameCallback: renameCallback,
-    forwards: forwards.toSeq)
-
   # Add explicit field renames
   for rename in renames:
     let oldName = rename.f.split('.')
@@ -770,6 +842,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   for opirCallback in opirCallbacks:
     fut = opirCallback(fut)
 
+  hint "Gathering symbols"
   # Gather symbols from first level of hierarchy
   for node in fut:
     let name = if node.hasKey("name"): node["name"].str else: ""
@@ -790,7 +863,9 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
           shouldImport = true
           break
     if shouldImport:
-      if node.hasKey("name"):
+      if node["kind"].str == "import":
+        createImport(node, state)
+      elif node.hasKey("name"):
         if not state.used.contains name:
           discard state.sanitizeName(node)
         state.used.incl name
@@ -801,6 +876,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         else:
           warning "Anonymous global: " & $node
 
+  hint "Find all imported symbols"
   # Find all imported symbols we need
   var usedLen = 0
   while state.used.len > usedLen:
@@ -812,6 +888,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     for name in newUsed:
       state.used.incl name
 
+  hint "Generate temporary names"
   # Generate temporary names to allow overriding definitions
   for name in state.used:
     if state.entities.hasKey(name):
@@ -827,6 +904,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     else:
       state.typeNameMap[name] = state.sanitizeName(name, "anon").ident
 
+  hint "Add name changes"
   # Add explicit type name changes
   for retype in retypes:
     var newType = parseExpr(retype.t)
@@ -834,12 +912,14 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     var fieldName = retype.f.split('.')
     state.retypes.mgetOrPut(fieldName[0].nimIdentNormalize, default(Table[string, NimNode]))[fieldName[1].nimIdentNormalize] = newType
 
+  hint "Generate Nim code"
   # Generate Nim code from Opir output with applicable post-processing
   for elem in state.used:
     if state.entities.hasKey elem:
       let
         node = state.entities[elem]
         comment = "Generated based on " & node["file"].str & ":" & $node["position"]["line"].num & ":" & $node["position"]["column"].num
+      state.currentFile = node["file"].str
       case node["kind"].str:
       of "struct", "union":
         createStruct(node["name"].str, state.renamed[node["name"].str], node, state, comment)
@@ -851,7 +931,15 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         newType[^1] = node["type"].toNimType(state)
         if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
           continue
-        state.types.add newType
+        state.addType node["file"].str, newType
+        var pointsTo = node["type"]
+        if pointsTo["kind"].str == "pointer":
+          pointsTo = pointsTo["base"]
+        if pointsTo["kind"].str == "alias" and state.entities.hasKey(pointsTo["value"].str):
+          pointsTo = state.entities[pointsTo["value"].str]
+          if pointsTo.hasKey("file") and pointsTo["file"] != node["file"]:
+            state.imports.mgetOrPut(node["file"].str, initHashSet[string]()).incl(
+              pointsTo["file"].str.relativePath(node["file"].str.parentDir).changeFileExt("nim"))
       of "enum":
         createEnum(node["name"].str, node, state, comment)
       of "proc":
@@ -865,25 +953,72 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       #else:
       #  echo "Unknown name: ", elem
 
+  hint "Add setting up imports"
   # Add non-dependant types and auxilary types
+  var fileResult: Table[string, NimNode]
   result = newStmtList()
   if not nodeclguards:
     result.add quote do:
       from macros import hint
-  for extraImport in state.extraImports:
-    result.add nnkImportStmt.newTree(parseExpr(extraImport))
-  result.add state.extraTypes
+      from os import parentDir
+  for file in state.files:
+    fileResult[file] = newStmtList()
+    if not nodeclguards:
+      fileResult[file].add quote do:
+        from macros import hint
+        from os import parentDir
 
+    if state.explicitImports.hasKey(file):
+      for imp in state.explicitImports[file]:
+        fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
+        fileResult[file].add nnkExportStmt.newTree(newIdentNode(imp.splitFile.name))
+    if state.imports.hasKey(file):
+      for imp in state.imports[file] - state.explicitImports[file]:
+        fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
+
+    let cfile = file.changeFileExt("c")
+    if fileExists(cfile):
+      hint "start"
+      echo cfile
+      echo outputPath
+      let
+        cfile = newLit(
+          if outputPath.len != 0:
+            let outputDir = file.relativePath(commonPrefix).absolutePath(outputPath).parentDir
+            cfile.relativePath(outputDir)
+          else: cfile)
+        hfile = newLit(
+          if outputPath.len != 0:
+            let outputDir = file.relativePath(commonPrefix).absolutePath(outputPath).parentDir
+            file.relativePath(outputDir)
+          else: file)
+        importDir = newLit(cfile.strVal.parentDir)
+      hint "stop"
+      fileResult[file].add quote do:
+        {.passC: "-I" & currentSourcePath().parentDir & "/" & `importDir`.}
+        {.compile: `cfile`.}
+  template resultAdd(file, node: untyped): untyped =
+    if file == "": result.add node
+    elif not fileResult.hasKey(file): result.add node
+    else: fileResult[file].add node
+
+  hint "Adding extra types"
+  for key, value in state.extraTypes:
+    resultAdd key, value
+
+  hint "Adding opaque types"
   when not noopaquetypes:
     # Generate required opaque types
     for o in state.opaqueTypes:
       let
         origIdent = state.renamed[o].ident
         ident = state.typeDefMap.getOrDefault(o, origIdent)
-      result.add origIdent.declGuard(quote do:
+      var file = if state.entities.hasKey(o): state.entities[o]["file"].str else: ""
+      resultAdd file, origIdent.declGuard(quote do:
         type
           `ident`* = object)
 
+  hint "Adding decl guards"
   when not nodeclguards:
     # Generate conditionals to define inner object types if not previously defined
     for name, defIdent in state.typeDefMap:
@@ -891,25 +1026,45 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       let
         origIdent = state.renamed[name].ident
         nameIdent = state.typeNameMap[name].exportMark
-      state.types.add (quote do:
+        file = state.entities[name]["file"].str
+      state.addType file, (quote do:
           type
             `nameIdent` = (when declared(`origIdent`): `origIdent` else: `defIdent`))[0]
-  result.add state.types
 
+  hint "Adding types"
+  for key, value in state.types:
+    resultAdd key, value
+
+  hint "Adding second level of decl guards"
   when not nodeclguards:
     # Generate conditionals to define objects if not previously defined
     for name, defIdent in state.typeDefMap:
       if defIdent.strVal == "void": continue
-      let origIdent = state.renamed[name].ident
+      let
+        origIdent = state.renamed[name].ident
+        file = state.entities[name]["file"].str
       if state.entities[name]["kind"].str != "enum":
-        result.add origIdent.declGuard(quote do:
+        resultAdd file, origIdent.declGuard(quote do:
           type
              `origIdent`* = `defIdent`)
 
+  hint "Adding generated procs"
   # Add generated procedures
-  result.add state.procs
+  for key, value in state.procs:
+    resultAdd key, value
 
   # Cache results
   hint "Caching Futhark output in " & futharkCache
   hostCreateDir(futharkCache.parentDir)
   writeFile(futharkCache, result.repr)
+
+  for file, content in fileResult:
+    let
+      file = file.relativePath(commonPrefix).absolutePath(outputPath)
+      outputDir = file.parentDir
+      common = futharkCache.relativePath(outputDir)
+    echo common
+    hint "Writing file " & file
+    hostCreateDir(outputDir)
+    writeFile(file.changeFileExt("nim"), "import \"" & common & "\" {.all.}\n\n" & content.repr)
+
