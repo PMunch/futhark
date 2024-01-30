@@ -1,4 +1,4 @@
-import strutils, os, json, posix, options, tables
+import strutils, os, json, posix, options, tables, hashes
 import clang, termstyle
 
 proc `$`(cxstr: CXString): string =
@@ -216,12 +216,12 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode
 proc genStructDecl(struct: CXCursor): JsonNode =
   let
     location = getLocation(struct)
-    name = "struct_" & struct.getName
     kind =
       if struct.getCursorKind == CXCursor_UnionDecl:
         "union"
       else:
         "struct"
+    name = kind & "_" & struct.getName
   result =
     if struct.Cursor_isAnonymous != 0:
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "fields": []}
@@ -233,11 +233,14 @@ proc genStructDecl(struct: CXCursor): JsonNode =
     of CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl, CXCursor_EnumDecl:
       case field.getCursorType.kind:
       of CXType_Record:
-        mainObj[]["fields"].add %*{"type": genStructDecl(field)}
+        mainObj[]["fields"].add %*{"type": genStructDecl(field), "typehash": hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex}
       of CXType_Enum:
         mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
       of CXType_Elaborated:
-        if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name"):
+        if mainObj[]["fields"].elems.len != 0 and
+            not mainObj[]["fields"].elems[^1].hasKey("name") and
+            mainObj[]["fields"].elems[^1].hasKey("typehash") and
+            mainObj[]["fields"].elems[^1]["typehash"].str == hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex:
           mainObj[]["fields"].elems[^1]["name"] = %field.getName
         else:
           mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType}
