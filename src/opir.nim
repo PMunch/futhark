@@ -281,7 +281,7 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   let
     location = getLocation(enumDecl)
     name = "enum_" & enumdecl.getName
-  echo name, ": ", enumdecl.getIntegerType.toNimType
+  #echo name, ": ", enumdecl.getIntegerType.toNimType
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
   if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
