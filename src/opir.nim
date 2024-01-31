@@ -233,7 +233,9 @@ proc genStructDecl(struct: CXCursor): JsonNode =
     of CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl, CXCursor_EnumDecl:
       case field.getCursorType.kind:
       of CXType_Record:
-        mainObj[]["fields"].add %*{"type": genStructDecl(field), "typehash": hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex}
+        let substruct = genStructDecl(field)
+        if substruct["fields"].len != 0:
+          mainObj[]["fields"].add %*{"type": substruct, "typehash": hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex}
       of CXType_Enum:
         mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
       of CXType_Elaborated:
