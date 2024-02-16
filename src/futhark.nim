@@ -614,6 +614,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     outputPath = newLit("")
     files = nnkBracket.newTree()
     importDirs = nnkBracket.newTree()
+    ignores = nnkBracket.newTree()
     cargs = nnkBracket.newTree()
     renames: seq[FromTo]
     retypes: seq[FromTo]
@@ -641,6 +642,8 @@ macro importc*(imports: varargs[untyped]): untyped =
       of "syspath":
         cargs.add superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
         sysPathDefined = true
+      of "ignore":
+        ignores.add superQuote do: hostAbsolutePath(`node[1]`, getProjectPath())
       of "compilerarg":
         cargs.add node[1]
       of "rename":
@@ -677,7 +680,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     let clangIncludePath = getClangIncludePath()
     if clangIncludePath != "":
       cargs.add newLit("-I" & clangIncludePath)
-  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
+  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `ignores`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
   echo result.repr
 
 proc hash*(n: NimNode): Hash = hash(n.treeRepr)
@@ -723,7 +726,7 @@ proc getCommonPrefix(strs: openArray[string]): string =
         break
   strs[0][0..lastSlash]
 
-macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], forwards: static[openArray[Forward]]): untyped =
+macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs, ignores: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], forwards: static[openArray[Forward]]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
   ## be converted is compiled with `compilerArguments` passed directly to clang.
@@ -752,7 +755,14 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       var files: HashSet[string]
       var extraIncludes: HashSet[string]
       for dir in importDirs:
+        if dir in ignores: continue
         for file in dir.walkDirRec:
+          block outer:
+            block inner:
+              for element in ignores:
+                if file.isRelativeTo(element): break inner
+              break outer
+            continue
           files.incl file
           if projectMode and file.splitFile.ext == ".h":
             defs &= "#include \"" & file & "\"\n"
