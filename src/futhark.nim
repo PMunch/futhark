@@ -962,12 +962,16 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   result = newStmtList()
   if not nodeclguards:
     result.add quote do:
+      {.warning[UnusedImport]:off.}
+      {.hint[XDeclaredButNotUsed]:off.}
       from macros import hint
       from os import parentDir
   for file in state.files:
     fileResult[file] = newStmtList()
     if not nodeclguards:
       fileResult[file].add quote do:
+        {.warning[UnusedImport]:off.}
+        {.hint[XDeclaredButNotUsed]:off.}
         from macros import hint
         from os import parentDir
 
