@@ -882,7 +882,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         ident = state.typeDefMap.getOrDefault(o, origIdent)
       result.add origIdent.declGuard(quote do:
         type
-          `ident`* = distinct object)
+          `ident`* {.incompleteStruct.} = object)
 
   when not nodeclguards:
     # Generate conditionals to define inner object types if not previously defined
