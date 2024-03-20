@@ -1,5 +1,6 @@
 import strutils, os, json, posix, options, tables, hashes
-import clang, termstyle
+import termstyle
+import libclang
 
 proc `$`(cxstr: CXString): string =
   result = $getCString(cxstr)
@@ -27,7 +28,7 @@ proc getRange(c: CXCursor): tuple[filename: string, line, column: cuint, endline
   ext.getRangeEnd.getPresumedLocation(filename.addr, result.endline.addr, result.endcolumn.addr)
   result.filename = $filename
 
-proc toNimCallingConv(cc: CXCallingConv): string =
+proc toNimCallingConv(cc: enumCXCallingConv): string =
   case cc:
   of CXCallingConv_Default: "noconv"
   of CXCallingConv_C: "cdecl"
@@ -38,7 +39,8 @@ proc toNimCallingConv(cc: CXCallingConv): string =
     CXCallingConv_X86RegCall, CXCallingConv_IntelOclBicc, CXCallingConv_Win64,
     CXCallingConv_X86_64SysV, CXCallingConv_X86VectorCall,
     CXCallingConv_Swift, CXCallingConv_PreserveMost,
-    CXCallingConv_PreserveAll, CXCallingConv_AArch64VectorCall: "unknownCallingConv"
+    CXCallingConv_PreserveAll, CXCallingConv_AArch64VectorCall,
+    Cxcallingconvswiftasync, Cxcallingconvaarch64svepcs: "unknownCallingConv"
   of CXCallingConv_Invalid: "invalidCallingConv"
   of CXCallingConv_Unexposed: "unexposedCallingConv"
 
@@ -183,7 +185,7 @@ except Exception as e:
   quit 1
 
 var unit = parseTranslationUnit(index, fname.cstring,
-                              commandLine, args.cint, nil, 0, CXTranslationUnit_DetailedPreprocessingRecord.cuint or CXTranslationUnit_SkipFunctionBodies.cuint)
+                              cast[ptr cstring](commandLine), args.cint, nil, 0, CXTranslationUnit_DetailedPreprocessingRecord.cuint or CXTranslationUnit_SkipFunctionBodies.cuint)
 deallocCStringArray(commandLine)
 
 var fatal = false
@@ -228,7 +230,7 @@ proc genStructDecl(struct: CXCursor): JsonNode =
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "fields": []}
     else:
       %*{"kind": kind, "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": name, "fields": []}
-  discard visitChildren(struct, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
+  discard visitChildren(struct, proc (field, parent: CXCursor, clientData: CXClientData): enumCXChildVisitResult {.cdecl.} =
     var mainObj = cast[ptr JsonNode](clientData)
     case field.getCursorKind:
     of CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl, CXCursor_EnumDecl:
@@ -281,7 +283,7 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   result = %*{"kind": "enum", "file": location.filename, "position": {"column": location.column, "line": location.line}, "base": enumdecl.getEnumDeclIntegerType.toNimType, "fields": []}
   if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
-  discard visitChildren(enumDecl, proc (field, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
+  discard visitChildren(enumDecl, proc (field, parent: CXCursor, clientData: CXClientData): enumCXChildVisitResult {.cdecl.} =
     var mainObj = cast[ptr JsonNode](clientData)
     mainObj[]["fields"].add %*{"name": field.getName, "value": $field.getEnumConstantDeclValue}
     CXChildVisitContinue
@@ -443,7 +445,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
 var cursor = getTranslationUnitCursor(unit)
 
 var output = newJArray()
-discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientData): CXChildVisitResult {.cdecl.} =
+discard visitChildren(cursor, proc (c, parent: CXCursor, clientData: CXClientData): enumCXChildVisitResult {.cdecl.} =
   var decl =
     case c.getCursorKind:
     of CXCursor_TypedefDecl:
