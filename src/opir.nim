@@ -71,8 +71,6 @@ proc toNimType(ct: CXType): JsonNode =
   of CXType_Double: %*{"kind": "base", "value": "cdouble"}
   of CXType_LongDouble: %*{"kind": "base", "value": "clongdouble"}
   of CXType_NullPtr: %*{"kind": "base", "value": "pointer"}
-  of CXType_Overload, CXType_Dependent, CXType_ObjCId, CXType_ObjCClass, CXType_ObjCSel, CXType_Float128, CXType_Half, CXType_Float16, CXType_ShortAccum, CXType_Accum,
-    CXType_LongAccum, CXType_UShortAccum, CXType_UAccum, CXType_ULongAccum, CXType_Complex: %*{"kind": "invalid", "value": "???"}
   of CXType_Pointer:
     let
       info = ct.getPointerInfo
@@ -122,7 +120,6 @@ proc toNimType(ct: CXType): JsonNode =
       %*{"kind": "alias", "value": value}
     else:
       newJNull()
-  of CXType_LValueReference, CXType_RValueReference, CXType_ObjCInterface, CXType_ObjCObjectPointer: %*{"kind": "invalid", "value": "???"}
   of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
   of CXType_FunctionProto, CXType_FunctionNoProto:
     ct.genProcDecl()
@@ -152,7 +149,11 @@ proc toNimType(ct: CXType): JsonNode =
       #  ct.getTypeDeclaration.genStructDecl
       #else:
       newJNull()
-  else: %*{"kind": "invalid", "value": "???"}
+  of CXType_Atomic:
+    %*{"kind": "atomic", "base": Type_getValueType(ct).toNimType}
+  else:
+    stderr.writeLine "Unknown type kind: ", ct.kind.int, ": ", ct.kind.getTypeKindSpelling
+    %*{"kind": "invalid", "value": "???"}
 
 proc toNimType(ct: CXCursor): JsonNode =
   case ct.getCursorType.kind:

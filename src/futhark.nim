@@ -146,6 +146,7 @@ type
     name: string
     extraPragmas: seq[string]
   State = object
+    extraImports: HashSet[string]
     entities: OrderedTable[string, JsonNode]
     opaqueTypes: HashSet[string]
     retypes: Table[string, Table[string, NimNode]]
@@ -204,7 +205,7 @@ proc findAlias(kind: JsonNode): string =
   case kind["kind"].str:
   of "alias": kind["value"].str
   of "base", "special", "vector": ""
-  of "pointer": findAlias(kind["base"])
+  of "pointer", "atomic": findAlias(kind["base"])
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
   of "proc": (if kind.hasKey("name"): kind["name"].str else: "")
@@ -242,7 +243,7 @@ proc addUsings(used: var OrderedSet[string], node: JsonNode) =
     if alias.len != 0:
       used.incl alias
     used.addUsings(node["type"])
-  of "pointer":
+  of "pointer", "atomic":
     let alias = node["base"].findAlias
     if alias.len != 0:
       used.incl alias
@@ -331,6 +332,9 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       nnkTupleTy.newTree(
         newIdentDefs("low".ident, "uint64".ident),
         newIdentDefs("high".ident, (if json["value"].str == "uint128": "uint64" else: "int64").ident))
+    of "atomic":
+      state.extraImports.incl "std/atomics"
+      nnkBracketExpr.newTree("Atomic".ident, json["base"].toNimType(state))
     else:
       warning "Unknown: " & $json
       "pointer".ident
@@ -864,6 +868,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   if not nodeclguards:
     result.add quote do:
       from macros import hint
+  for extraImport in state.extraImports:
+    result.add nnkImportStmt.newTree(parseExpr(extraImport))
   result.add state.extraTypes
 
   when not noopaquetypes:
