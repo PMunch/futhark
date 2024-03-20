@@ -414,7 +414,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
       else:
         field["type"]
     let (saneFieldName, fname) =
-      if field.hasKey("name"):
+      if field.hasKey("name") and field["name"].str.len != 0:
         let
           saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName)
           fname =
@@ -429,6 +429,8 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     let fident =
       if node.hasKey("alignment"):
         nnkPragmaExpr.newTree(fname.ident.postfix "*", nnkPragma.newTree(nnkCall.newTree("align".ident, newLit(node["alignment"].num))))
+      elif field.hasKey("bitsize"):
+        nnkPragmaExpr.newTree(fname.ident.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("bitsize".ident, newLit(field["bitsize"].num))))
       else:
         fname.ident.postfix "*"
     if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):

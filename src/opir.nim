@@ -257,7 +257,10 @@ proc genStructDecl(struct: CXCursor): JsonNode =
         else:
           mainObj[]["fields"].add val
       else:
-        mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType}
+        if CursorIsBitField(field) != 0:
+          mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType, "bitsize": field.getFieldDeclBitWidth}
+        else:
+          mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType}
     of CXCursor_PackedAttr:
       mainObj[]["packed"] = %true
     of CXCursor_AlignedAttr:
