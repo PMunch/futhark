@@ -185,7 +185,7 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
     result.add kind
     renamed = true
   if usedNames.contains(result) or result in builtins:
-    result.add hash(origName).toHex
+    result.add hash(origName).uint32.toHex
     renamed = true
   if renamed:
     hint "Renaming \"" & origName & "\" to \"" & result & "\"" & (if partof.len != 0: " in " & partof else: "")
