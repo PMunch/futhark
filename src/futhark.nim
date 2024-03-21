@@ -662,7 +662,7 @@ macro importc*(imports: varargs[untyped]): untyped =
   if not sysPathDefined:
     let clangIncludePath = getClangIncludePath()
     if clangIncludePath != "":
-      cargs.add newLit("-I" & clangIncludePath)
+      cargs.add newLit("-I" & hostQuoteShell(clangIncludePath))
   result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
 
 proc hash*(n: NimNode): Hash = hash(n.treeRepr)
