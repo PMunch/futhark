@@ -213,6 +213,22 @@ arguments this is ignored by default. However if you for some reason require
 this you might add `-d:preAnsiFuncDecl` while compiling.
 
 ## Deeper control
+### Rename callback
+If you want to rename identifiers, for example removing common prefixes,
+postfixes, or other similar things you can use a rename callback. This can be
+defined by adding `renameCallback <procedure name>` to your `importc` block. The
+signature of the callback is:
+```
+proc(name: string, kind: string, partof = ""): string
+```
+where `name` is the original name as present in the C code, `kind` is the kind
+of the identifier such as "enum", "proc", "arg", "field", etc. The argument
+`partof` is only used for field names in a structure.
+
+Please note that in order to avoid name collisions the normal anti-collision
+transformations are done after the rename callback.
+
+### Øpir callbacks
 In case you face issues that aren't easily solveable there is one last option
 for making modifications, and this is Øpir hooks. Since Øpir converts your C
 imports to a JSON format you're able to register hooks that will be run before
@@ -221,7 +237,7 @@ and returns a `JsonNode`. With this you're able to change every aspect of the
 JSON, and even add or remove definitions. The callbacks are a list, so modules
 to perform certain commonly done transformations (e.g. combine similarly named
 constants into an enum) could be added to the list of callbacks easily. To add
-these simply add in `outputPath <procedure name>` to your `importc` block.
+these simply add in `addOpirCallback <procedure name>` to your `importc` block.
 
 ## Destructors
 If you are using a C library you will probably want to wrap destructor calls.
@@ -378,6 +394,18 @@ machines) lives in to the linker:
 nimble install --passL:"-L<path to lib directory containing libclang.so file>" futhark
 #e.g.: nimble install --passL:"-L/usr/lib/llvm-6.0/lib" futhark
 ```
+
+# Known wrappers made with Futhark
+By the nature of Futhark wrappers can be made on the fly for a specific project.
+I've wrapped many large C projects with Futhark, but just for use in specific,
+and sometimes proprietary, codebases. That being said this list contains
+wrappers that are made with Futhark which have been published in some shape or
+form. These can very from just a simple file with some Futhark instructions, to
+full projects that add nice-to-have features on top of an existing C library. If
+you have a project of your own you want to show off, please make a PR!
+
+- [MAPM](https://github.com/PMunch/mapm-nim): Fully wrapped with destructors and a nice Nim interface
+- [libfuse](https://github.com/PMunch/libfuse-nim/blob/master/libfuse.nim): Quick and dirty wrapper for libfuse to play around with filesystems
 
 ## TODO
 - Proper handling of C macros (inherently hard because C macros are typeless)
