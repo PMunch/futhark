@@ -406,7 +406,7 @@ you have a project of your own you want to show off, please make a PR!
 
 - [MAPM](https://github.com/PMunch/mapm-nim): Fully wrapped with destructors and a nice Nim interface
 - [libfuse](https://github.com/PMunch/libfuse-nim/blob/master/libfuse.nim): Quick and dirty wrapper for libfuse to play around with filesystems
-
+- [Nim_Libmem](https://github.com/Hypnootika/Nim_Libmem/tree/main) WIP(due to underlying lib changes) Libmem wrapper. Completely wrapped and also a seperate "convenience_layer". Also experimental Python export.
 ## TODO
 - Proper handling of C macros (inherently hard because C macros are typeless)
 - Find way to not require C compiler include paths
