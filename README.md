@@ -175,7 +175,7 @@ redeclare existing things, including built in types and names.
 
 ### Opaque type functionality
 If a type is not fully declared in your C headers but is still required for
-your project Futhark will generate a `type SomeType {.incompleteStruct.} = object` dummy
+your project Futhark will generate a `type SomeType = object` dummy
 type for it. Since most C libraries will pass things by pointer this makes sure
 that a `ptr SomeType` can exist and be passed around without having to know
 anything about `SomeType`. Disabling this feature will remove these definitions
