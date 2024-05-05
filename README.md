@@ -3,9 +3,9 @@
 Have your eyes set on the perfect C library for your project? Can't find a
 wrapper for it in Nim? Look no further! Futhark aims to allow you to simply
 import C header files directly into Nim, and allow you to use them like you
-would from C without any manual intervention. It's still in an alpha state, but
-it can already wrap many complex header files without any rewrites or
-pre-processing.
+would from C without any manual intervention. It's still in a beta state, but it
+already wraps most header files without any rewrites or pre-processing and has
+successfully been used to wrap complex projects.
 
 ```nim
 import futhark
@@ -62,16 +62,28 @@ then reads this file and applies any overrides to types and names before it
 generates all the Nim definitions.
 
 ## Basic usage
+A lot of people coming from other wrapping tools start out a bit confused about
+Futhark. With other tools it is common to wrap things into a Nim module first,
+then import that module into your program. This is not the way Futhark is
+supposed to be used. With Futhark you handle your C imports in the `importc`
+block and just import the module in which you have that block. This is to ensure
+that all defines, configurations, and platform specific things will match up
+between your code and the C code. It is however possible to use Futhark to
+generate a wrapper, this is detailed in the "Shipping wrappers" section of this
+README.
+
 The four main things you need to know to use Futhark is `sysPath`, `path`,
 `compilerArgs`, and normal imports (the `"stb_image.h"` part in the above
 example).
 - `sysPath` denotes system paths, these will be passed to Øpir to make sure
   Clang knows where to find all the definitions. This can also be passed with
-  `-d:sysPath:<path 1>:<path 2>` if you want to automatically generate these.
+  `-d:sysPath:<path 1>:<path 2>` if you want to automatically generate these. By
+  default Futhark tries to find the `sysPath` automatically and you don't need
+  to specify this yourself.
 - `path` denotes library paths, these will also be passed to Øpir, but anything
-  found in these paths which is used by the files you have in your project will
-  be wrapped by Futhark as well.
-- `comppilerArgs` specifies additional flags that should be passed to Clang
+  found in these files which is used by anything in the explicitly imported
+  files will be wrapped by Futhark as well.
+- `compilerArgs` specifies additional flags that should be passed to Clang
   when parsing the C headers.
 - Files listed in quotes in the importc are equivalent to `#include "file.h"`
   in C. Futhark will generate all definitions in these files, and if `file.h`
@@ -79,14 +91,14 @@ example).
   will also be imported.
 
 Note: The difference between `sysPath` and `path` is simply about how Futhark
-handles the files. `sysPath` are paths which are fed to Øpir and Clang in order
-to make Clang able to read all the types. `path` are the paths Futhark takes
-into account when generating definitions. This difference exists to make sure
-Futhark doesn't import all kinds of low-level system stuff which is already
-available in Nim. A subpath of `sysPath` can be passed in with `path` without
-trouble. So `sysPath "/usr/include"` followed by `path "/usr/include/X11"` is
-fine and Futhark will only generate code for the explicitly mentioned files,
-and any files it requires from `/usr/include/X11`.
+handles definitions found in these paths. `sysPath` are paths which are fed to
+Øpir and Clang in order to make Clang able to read all the types. `path` are
+the paths Futhark takes into account when generating definitions. This
+difference exists to make sure Futhark doesn't import all kinds of low-level
+system stuff which is already available in Nim. A subpath of `sysPath` can be
+passed in with `path` without trouble. So `sysPath "/usr/include"` followed by
+`path "/usr/include/X11"` is fine and Futhark will only generate code for the
+explicitly mentioned files, and any files it requires from `/usr/include/X11`.
 
 ## Hard names and overrides
 Nim, unlike C, is case and underscore insensitive and doesn't allow you to have
@@ -99,6 +111,7 @@ this Futhark will rename these according to some fairly simple rules.
 | ---------------- | --------------------------------------------------- |
 | struct type      | `struct_` prefix                                    |
 | union type       | `union_` prefix                                     |
+| enum type        | `enum_` prefix                                      |
 | `_` prefix       | `internal` prefix                                   |
 | `__` prefix      | `compiler` prefix                                   |
 | `__` in name     | All underscores removed                             |
@@ -300,30 +313,31 @@ course be written in camelCase if you prefer, it will still match the forward
 declaration.
 
 # Shipping wrappers
-If you've built wrappers with Futhark, and expanded them with a Nim interface
-and now it's time to share them. This section will give some best-practices on
-how to ship wrappers. Since the Øpir tool requires Clang to be installed it can
-be a bit tricky to get Futhark installed. In addition to this Futhark obviously
-requires access to the C header files, which might be installed in different
-places based on the system. Because of these things you might not want to have
-Futhark as a dependency for your bindings. To help with this Futhark has a
-`outputPath` argument which can be added to the `importc` block. This path is
-where the completed bindings will be stored, and also where Futhark will look
-for existing bindings to avoid rebuilding them. This means that with the
-`outputPath` set to a file you will need to use `-d:futharkRebuild` to update
-the file when you make changes in the `importc` block. If you set `outputPath`
-to a folder then `futhark` will store the files with the appended hash in this
-folder instead of in the `nimcache` folder and caching will work as usual. By
-using this feature you will be able to set a path local to your project and
-check the generated Futhark file into your version control system. But that is
-only half the job, because to be aware of the cache file Futhark still needs to
-be installed. The recommended way to get around this is to do a
-`when defined(useFuthark)` switch to check whether the user wants to use Futhark
-directly or to use the shipped wrapper. It is recommended to use the exact name
-`useFuthark`, this way the user can turn on Futhark for the entire project (in
-case you have imported another library which also uses Futhark). If you want to
-give the user the option to switch on Futhark for only your project it is
-recommended to use an additional switch with `useFutharkFor<project name>`.
+You've built wrappers with Futhark, expanded them with a nice Nim interface and
+it's time to share them with the world! This section will give some
+best-practices on how to ship wrappers. Since the Øpir tool requires Clang to
+be installed it can be a bit tricky to get Futhark installed. In addition to
+this Futhark obviously requires access to the C header files, which might be
+installed in different places based on the system. Because of these things you
+might not want to have Futhark as a dependency for your bindings. To help with
+this Futhark has an `outputPath` argument which can be added to the `importc`
+block. This path is where the completed bindings will be stored, and also where
+Futhark will look for existing bindings to avoid rebuilding them. This means
+that with the `outputPath` set to a file you will need to use
+`-d:futharkRebuild` to update the file when you make changes in the `importc`
+block. If you set `outputPath` to a folder then `futhark` will store the files
+with the appended hash in this folder instead of in the `nimcache` folder and
+caching will work as usual. By using this feature you will be able to set a
+path local to your project and check the generated Futhark file into your
+version control system. But that is only half the job, because to be aware of
+the cache file Futhark still needs to be installed. The recommended way to get
+around this is to do a `when defined(useFuthark)` switch to check whether the
+user wants to use Futhark directly or to use the shipped wrapper. It is
+recommended to use the exact name `useFuthark`, this way the user can turn on
+Futhark for the entire project (in case you have imported another library which
+also uses Futhark). If you want to give the user the option to switch on
+Futhark for only your project it is recommended to use an additional switch
+with `useFutharkFor<project name>`.
 
 A complete sample would look a bit something like this:
 
@@ -346,6 +360,38 @@ would be placed in the folder of your package using this code. If the
 use the one specified in your package installation, while users doing
 `useFuthark` would generate one based on its hash (or reuse yours if the hash
 matches).
+
+## Project mode
+Futhark is best used when it is allowed to see the C files while compiling. This
+allows it to make sure that all platform specific stuff matches up perfectly.
+However this is not always possible, or for whatever other reason wanted. One
+scenario where this is the case is for embedded projects. The Futhark macro
+doesn't work when targeting platforms without proper OS support, so using it the
+recommended way is simply not possible.
+
+Because of this it is also possible to use Futhark in "project mode". In project
+mode you simply don't specify any files to import. Instead you only specify
+which `path`'s you want to search. Futhark will then recreate the original
+folder structure of the header files it finds and generate Nim files in their
+place. These try to properly import and export each other so the behaviour is as
+similar to C and if Futhark finds `.c` files next to the `.h` files of the same
+name it also adds `{.passL:"-I<path>".}` and `{.compile: "<file>".}` pragmas to
+automatically import and compile the required C files. This means that a
+separate dummy wrapper project can be set up which just generates this folder
+structure, and the main project can simply import files from this folder as if
+they where normal modules.
+
+While this is quite a nice feature it isn't as bullet-proof as the traditional
+way to use Futhark. It might require some pre-processing of the C project, and
+it often means more work with getting everything compiled properly. But when
+normal Futhark usage isn't possible or desired this is a decent option.
+
+To minimize the pre-processing burden this mode also adds a new option `ignore`
+to the `importc` block. This is simply a file or folder to ignore while
+traversing the given paths. Futhark will not try to generate any input for this
+file/folder, but it will look at the headers inside to resolve other parts of
+the project. This is mainly useful if you have folders with examples or other
+code you're not actually supposed to import.
 
 # But why not use c2nim or nimterop?
 Both c2nim and nimterop have failed me in the past when wrapping headers. This
