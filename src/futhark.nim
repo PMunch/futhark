@@ -687,7 +687,6 @@ macro importc*(imports: varargs[untyped]): untyped =
     if clangIncludePath != "":
       cargs.add newLit("-I" & hostQuoteShell(clangIncludePath))
   result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `ignores`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
-  echo result.repr
 
 proc hash*(n: NimNode): Hash = hash(n.treeRepr)
 
@@ -992,9 +991,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
 
     let cfile = file.changeFileExt("c")
     if fileExists(cfile):
-      hint "start"
-      echo cfile
-      echo outputPath
       let
         cfile = newLit(
           if outputPath.len != 0:
@@ -1007,7 +1003,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
             file.relativePath(outputDir)
           else: file)
         importDir = newLit(cfile.strVal.parentDir)
-      hint "stop"
       fileResult[file].add quote do:
         {.passC: "-I" & currentSourcePath().parentDir & "/" & `importDir`.}
         {.compile: `cfile`.}
@@ -1077,7 +1072,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       file = file.relativePath(commonPrefix).absolutePath(outputPath)
       outputDir = file.parentDir
       common = futharkCache.relativePath(outputDir)
-    echo common
     hint "Writing file " & file
     hostCreateDir(outputDir)
     writeFile(file.changeFileExt("nim"), "import \"" & common & "\" {.all.}\n\n" & content.repr)
