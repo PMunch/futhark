@@ -755,7 +755,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
 
   let
     projectMode = files.len == 0
-    commonPrefix = importDirs.getCommonPrefix
+    commonPrefix = if importDirs.len == 0: "/" else: importDirs.getCommonPrefix
     extraFiles = block:
       var files: HashSet[string]
       var extraIncludes: HashSet[string]
