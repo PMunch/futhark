@@ -1,0 +1,2 @@
+--define:noidentnormalize
+--define:nodeclguards
