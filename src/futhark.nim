@@ -218,7 +218,7 @@ proc isValidIdent(name: string): bool =
     if not (c in identChars):
       return false
     lastChar = c
-  true
+  lastChar != '_'
 
 proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
   result = origName
@@ -229,18 +229,22 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
       result = "compiler_" & result[2..^1]
     else:
       result = "internal_" & result[1..^1]
+  var normalizedName = result.nimIdentNormalize()
   if (not noIdentNormalize) or not result.isValidIdent:
-    result = result.nimIdentNormalize()
+    result = normalizedName
   var renamed = false
-  if usedNames.contains(result) or result in builtins:
+  if usedNames.contains(normalizedName) or result in builtins:
+    normalizedName.add kind
     result.add kind
     renamed = true
-  if usedNames.contains(result) or result in builtins:
-    result.add hash(origName).uint32.toHex
+  if usedNames.contains(normalizedName) or result in builtins:
+    let uniqueTail = hash(origName).uint32.toHex
+    result.add uniqueTail
+    normalizedName.add uniqueTail
     renamed = true
   if renamed:
     hint "Renaming \"" & origName & "\" to \"" & result & "\"" & (if partof.len != 0: " in " & partof else: "")
-  usedNames.incl result
+  usedNames.incl normalizedName
 
 proc sanitizeName(state: var State, origName: string, kind: string): string {.compileTime.} =
   if not state.renamed.hasKey(origName):
