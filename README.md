@@ -205,19 +205,19 @@ will be exported as well and documentation will be readable. This is mostly
 useful if you want to export documentation but can't use `nodeclguards` (which
 makes even more readable documentation).
 
+### Preventing identifier normalization
+By default, Futhark generates identifiers that are normalized per 
+[`strutils.nimIdentNormalize`](https://nim-lang.org/docs/strutils.html#nimIdentNormalize%2Cstring).
+You might prefer keeping the case convention from your source library consistent 
+with your wrapper and in cases when the source name is a valid Nim identifier you can can use 
+`-d:noIdentNormalize`. For the cases when a source name is not a valid Nim identifier 
+this flag is ignored.
+
 ## Inline functions
 When using Futhark with dynamic libraries it doesn't make sense to wrap inline
 functions. However if you are compiling your code directly against some C code
 these might be useful to you. In this case you can pass `-d:generateInline` to
 generate function definitions for inline functions.
-
-## Preventing identifier normalization
-By default, Futhark generates identifiers that are normalized per 
-[`strutils.nimIdentNormalize`](https://nim-lang.org/docs/strutils.html#nimIdentNormalize%2Cstring).
-You might prefer keeping the case convention from your source library consistent 
-with your wrappe and in cases when the source name is a valid Nim identifier you can can use 
-`-d:noIdentNormalize`. For the cases when a source name is not a valid Nim identifier 
-this flag is ignored.
 
 ## Pre-ANSI C function declarations
 Also known as K&R style functions. By definition C code like
