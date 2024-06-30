@@ -235,7 +235,9 @@ proc findAlias(kind: JsonNode): string =
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
   of "proc": (if kind.hasKey("name"): kind["name"].str else: "")
-  else: error("Unknown kind in findAlias: " & $kind)
+  else: 
+    error("Unknown kind in findAlias: " & $kind)
+    ""
 
 proc addUsings(used: var OrderedSet[string], node: JsonNode) =
   case node["kind"].str:
@@ -345,8 +347,10 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       state.typeNameMap[json["value"].str]
     of "enum":
       error "Unable to resolve nested enums from here"
+      "invalidNestedEnum".ident
     of "struct", "union":
       error "Unable to resolve nested struct/union from here"
+      "invalidNestedStruct".ident
     of "vector":
       nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), newEmptyNode())
     of "special":
@@ -822,6 +826,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         if opirRes.output == "" and opirRes.exitCode == -1:
           err.add " Are you sure opir is in PATH?"
         error err
+        ""
       else:
         let opirOutput = opirRes.output.strip(chars=Whitespace).splitLines
         for i in 0..<opirOutput.high:
