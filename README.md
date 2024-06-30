@@ -102,7 +102,7 @@ explicitly mentioned files, and any files it requires from `/usr/include/X11`.
 
 ## Hard names and overrides
 Nim, unlike C, is case and underscore insensitive and doesn't allow you to have
-identifiers starting with `_` or `__`, or identifiers that have more than one
+identifiers starting or ending with `_`, or identifiers that have more than one
 consecutive `_` in them. Nim also has a set of reserved keywords like `proc`,
 `addr`, and `type` which would be inconvenient to have as names. Because of
 this Futhark will rename these according to some fairly simple rules.
@@ -112,19 +112,23 @@ this Futhark will rename these according to some fairly simple rules.
 | struct type      | `struct_` prefix                                    |
 | union type       | `union_` prefix                                     |
 | enum type        | `enum_` prefix                                      |
-| `_` prefix       | `internal` prefix                                   |
-| `__` prefix      | `compiler` prefix                                   |
-| `__` in name     | All underscores removed                             |
+| `_` prefix       | `internal_` prefix                                  |
+| `__` prefix      | `compiler_` prefix                                  |
+| `_` postfix      | `_private` postfix                                  |
+| `__` in name     | All consecutive underscores collapsed into one      |
 | Reserved keyword | Append kind to name, `proc`, `const`, `struct` etc. |
 
-Since this, along with Nims style-insensitivity, means that some identifiers
-might still collide, the name will further have the kind appended, and if it
-still collides it will append the hash of the original identifier. This
-shouldn't happen often in real projects and exists mostly to create a foolproof
-renaming scheme. Note that struct and union types also get a prefix, this is
-normally resolved automatically by C typedef-ing the `struct struct_name` to
-`struct_name_t`, but in case you need to use a `struct struct_name` type just
-keep in mind that in Nim it will be `struct_struct_name`.
+Apart from this the name is kept as it appears in the C sources, but note that
+because of Nims style insensitivity you can still call `some_proc` as `someProc`
+without any issues. This renaming scheme, along with Nims style-insensitivity,
+does however mean that some identifiers might collide. In this case the name
+will further have the kind appended, and if it still collides it will append
+the hash of the original identifier. This shouldn't happen often in real
+projects and exists mostly to create a foolproof renaming scheme. Note that
+struct and union types also get a prefix, this is normally resolved
+automatically by C typedef-ing the `struct struct_name` to `struct_name_t`, but
+in case you need to use a `struct struct_name` type just keep in mind that in
+Nim it will be `struct_struct_name`.
 
 If you want to rename an object or a field you can use the `rename` directive.
 Simply put `rename <from>, <to>` along with your other options. `<from>` can be
@@ -204,14 +208,6 @@ visible and the documentation mostly useless. With `exportall` these symbols
 will be exported as well and documentation will be readable. This is mostly
 useful if you want to export documentation but can't use `nodeclguards` (which
 makes even more readable documentation).
-
-### Preventing identifier normalization
-By default, Futhark generates identifiers that are normalized per 
-[`strutils.nimIdentNormalize`](https://nim-lang.org/docs/strutils.html#nimIdentNormalize%2Cstring).
-You might prefer keeping the case convention from your source library consistent 
-with your wrapper and in cases when the source name is a valid Nim identifier you can can use 
-`-d:noIdentNormalize`. For the cases when a source name is not a valid Nim identifier 
-this flag is ignored.
 
 ## Inline functions
 When using Futhark with dynamic libraries it doesn't make sense to wrap inline

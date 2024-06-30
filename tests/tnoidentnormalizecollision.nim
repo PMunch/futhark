@@ -25,11 +25,11 @@ doAssert(My_Varconst038D4D97 == 7) # Renamed as 4th and 5th definiton collides
 
 # Manually test identifier case of output
 doAssert " my_var*" in outputText
-doAssert " myVarconst*" in outputText
-doAssert " myvarconstC690172C*" in outputText
+doAssert " myVar_const*" in outputText
+doAssert " myvar_const_C690172C*" in outputText
 doAssert " MYVAR*" in outputText
-doAssert " MyVarconst2E4AA817*" in outputText
-doAssert " My_Varconst038D4D97*" in outputText
+doAssert " MyVar_const_2E4AA817*" in outputText
+doAssert " My_Var_const_038D4D97*" in outputText
 
 # `myvar` was renamed in the second name collision, so we can check its 
 # nonexistence in the output file.

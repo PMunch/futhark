@@ -34,7 +34,6 @@ const
   preAnsiFuncDecl = defined(preAnsiFuncDecl)
   echoForwards = defined(echoForwards)
   generateInline = defined(generateInline)
-  noIdentNormalize = defined(noIdentNormalize)
   VERSION = block:
     # source style, go up one dir
     var nimblePath = currentSourcePath().parentDir().parentDir() / "futhark.nimble"
@@ -187,59 +186,32 @@ proc isUnsignedNumber(x: string): bool =
   except ValueError:
     result = false
 
-const identStartChars = {'a'..'z', 'A'..'Z', char(0x80)..char(0xff)}
-const identChars = identStartChars + {'0'..'9', '_'}
-
-iterator span(s: string, startIndex: int, endIndex: int = 0): char = 
-  # Span of characters in string `s`, starting at startIndex (inclusive)
-  # and ending at endIndex (exclusive). If endIndex is 0, then iterate to 
-  # end of string.
-
-  var endIndex = if endIndex == 0:
-    s.len
-  else:
-    endIndex  
-  for i in startIndex..<endIndex: 
-    yield s[i]
-
-proc isValidIdent(name: string): bool = 
-  #  Check for https://nim-lang.org/docs/manual.html#lexical-analysis-identifiers-amp-keywords
-  
-  if name.len == 0:
-    return false
-  let firstChar = name[0]
-  let startCondition = firstChar in identStartChars
-  if not startCondition or name.len == 1:
-    return startCondition
-  var lastChar = firstChar
-  for c in name.span(1):
-    if (lastChar == c) and (c == '_'):
-      return false
-    if not (c in identChars):
-      return false
-    lastChar = c
-  lastChar != '_'
-
 proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
   result = origName
   if not renameCallback.isNil:
     result = result.renameCallback(kind, partof)
+
+  # These checks should ensure that valid C names which are invalid Nim names get renamed
   if result.startsWith("_"):
     if result.startsWith("__"):
       result = "compiler_" & result[2..^1]
     else:
       result = "internal_" & result[1..^1]
-  var normalizedName = result.nimIdentNormalize()
-  if (not noIdentNormalize) or not result.isValidIdent:
-    result = normalizedName
-  var renamed = false
+  if result.endsWith("_"):
+    result = result & "private"
+  while (let oldLen = result.len; result = result.replace("__", "_"); result.len != oldLen): discard
+
+  # These should ensure all identifiers are unique in Nim
+  var
+    normalizedName = result.nimIdentNormalize()
+    renamed = false
   if usedNames.contains(normalizedName) or result in builtins:
+    result.add "_" & kind
     normalizedName.add kind
-    result.add kind
     renamed = true
   if usedNames.contains(normalizedName) or result in builtins:
     let uniqueTail = hash(origName).uint32.toHex
-    result.add uniqueTail
+    result.add "_" & uniqueTail
     normalizedName.add uniqueTail
     renamed = true
   if renamed:
