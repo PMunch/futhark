@@ -1,7 +1,6 @@
 import macros, strutils, os, json, tables, sets, sugar, hashes, std/compilesettings, sequtils, pathnorm
 import macroutils except Lit
 import pkg/nimbleutils
-from system/nimscript import thisDir
 
 const
   Stringable = {nnkStrLit..nnkTripleStrLit, nnkCommentStmt, nnkIdent, nnkSym}
@@ -236,9 +235,7 @@ proc findAlias(kind: JsonNode): string =
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
   of "proc": (if kind.hasKey("name"): kind["name"].str else: "")
-  else:
-    error("Unknown kind in findAlias: " & $kind)
-    ""
+  else: error("Unknown kind in findAlias: " & $kind)
 
 proc addUsings(used: var OrderedSet[string], node: JsonNode) =
   case node["kind"].str:
@@ -286,8 +283,7 @@ proc addUsings(used: var OrderedSet[string], node: JsonNode) =
   of "const":
     if node["type"]["kind"].str != "unknown":
       used.addUsings(node["type"])
-  else:
-    error("Unknown node in addUsings: " & $node)
+  else: error("Unknown node in addUsings: " & $node)
 
 proc addKnown(state: var State, known: string) =
   state.knownValues.incl state.renamed[known]
@@ -349,10 +345,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       state.typeNameMap[json["value"].str]
     of "enum":
       error "Unable to resolve nested enums from here"
-      "invalidNestedEnum".ident
     of "struct", "union":
       error "Unable to resolve nested struct/union from here"
-      "invalidNestedStruct".ident
     of "vector":
       nnkObjectTy.newTree(newEmptyNode(), newEmptyNode(), newEmptyNode())
     of "special":
@@ -828,7 +822,6 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         if opirRes.output == "" and opirRes.exitCode == -1:
           err.add " Are you sure opir is in PATH?"
         error err
-        "" # error is not noreturn
       else:
         let opirOutput = opirRes.output.strip(chars=Whitespace).splitLines
         for i in 0..<opirOutput.high:
