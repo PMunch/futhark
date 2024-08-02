@@ -655,7 +655,7 @@ macro importc*(imports: varargs[untyped]): untyped =
         sysPathDefined = true
       of "ignore":
         ignores.add superQuote do: hostAbsolutePath(`node[1]`, getProjectPath())
-      of "compilerarg":
+      of "compilerarg", "compilerargs":
         cargs.add node[1]
       of "rename":
         let
