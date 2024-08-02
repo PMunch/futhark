@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.13.2"
+version       = "0.13.3"
 author        = "PMunch"
 description   = "A package which uses libclang to parse C headers into Nim files for easy interop"
 license       = "MIT"
@@ -14,4 +14,4 @@ bin           = @["opir"]
 requires "nim >= 1.4.8"
 requires "termstyle"
 requires "macroutils"
-requires "https://github.com/PMunch/nimbleutils >= 0.3.2"
+requires "https://github.com/PMunch/nimbleutils >= 0.3.3"
