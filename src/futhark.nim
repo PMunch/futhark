@@ -974,7 +974,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     result.add quote do:
       {.warning[UnusedImport]:off.}
       {.hint[XDeclaredButNotUsed]:off.}
-      from macros import hint
+      from macros import hint, warning
       from os import parentDir
   for file in state.files:
     fileResult[file] = newStmtList()
@@ -982,7 +982,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       fileResult[file].add quote do:
         {.warning[UnusedImport]:off.}
         {.hint[XDeclaredButNotUsed]:off.}
-        from macros import hint
+        from macros import hint, warning
         from os import parentDir
 
     if state.explicitImports.hasKey(file):
@@ -1037,12 +1037,17 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     for name, defIdent in state.typeDefMap:
       if defIdent.strVal == "void": continue
       let
-        origIdent = state.renamed[name].ident
+        origName = state.renamed[name]
+        origIdent = origName.ident
         nameIdent = state.typeNameMap[name].exportMark
         file = state.entities[name]["file"].str
       state.addType file, (quote do:
           type
-            `nameIdent` = (when declared(`origIdent`): `origIdent` else: `defIdent`))[0]
+            `nameIdent` = (when declared(`origIdent`):
+              when sizeof(`origIdent`) != sizeof(`defIdent`):
+                static: warning("Declaration of " & `origName` & " exists but with different size")
+              `origIdent`
+            else: `defIdent`))[0]
 
   hint "Adding types"
   for key, value in state.types:
