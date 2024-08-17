@@ -375,7 +375,8 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
 
 proc createEnum(origName: string, node: JsonNode, state: var State, comment: string) =
   let
-    name = state.sanitizeName(origName, "enum").ident
+    origNameIdent = origName.ident
+    name = state.typeDefMap.getOrDefault(origName, origNameIdent) #state.sanitizeName(origName, "enum").ident
     baseType = node["base"].toNimType(state)
   var
     enumTy = nnkEnumTy.newTree(newEmptyNode())
@@ -406,9 +407,9 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
         dummy""")[0][0]
     typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))))
     typedef[2] = enumTy
-    state.addExtraType(node["file"].str, name.declGuard(quote do:
+    state.addExtraType(node["file"].str, quote do:
       type
-        `name`* {.size: sizeof(`baseType`).} = `enumTy`))
+        `name`* {.size: sizeof(`baseType`).} = `enumTy`)
   state.addExtraType(node["file"].str, consts)
 
 proc createStruct(origName, saneName: string, node: JsonNode, state: var State, comment: string) =
@@ -1074,10 +1075,9 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       let
         origIdent = state.renamed[name].ident
         file = state.entities[name]["file"].str
-      if state.entities[name]["kind"].str != "enum":
-        resultAdd file, origIdent.declGuard(quote do:
-          type
-             `origIdent`* = `defIdent`)
+      resultAdd file, origIdent.declGuard(quote do:
+        type
+           `origIdent`* = `defIdent`)
 
   hint "Adding generated procs"
   # Add generated procedures
