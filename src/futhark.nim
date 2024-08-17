@@ -983,21 +983,25 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   hint "Add setting up imports"
   # Add non-dependant types and auxilary types
   var fileResult: Table[string, NimNode]
+  let xIdent = newIdentNode("x")
   result = newStmtList()
   if not nodeclguards:
     result.add quote do:
       {.warning[UnusedImport]:off.}
       {.hint[XDeclaredButNotUsed]:off.}
-      from macros import hint, warning
+      from macros import hint, warning, newLit, getSize
       from os import parentDir
+      macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+
   for file in state.files:
     fileResult[file] = newStmtList()
     if not nodeclguards:
       fileResult[file].add quote do:
         {.warning[UnusedImport]:off.}
         {.hint[XDeclaredButNotUsed]:off.}
-        from macros import hint, warning
+        from macros import hint, warning, newLit, getSize
         from os import parentDir
+        macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
 
     if state.explicitImports.hasKey(file):
       for imp in state.explicitImports[file]:
@@ -1058,7 +1062,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       state.addType file, (quote do:
           type
             `nameIdent` = (when declared(`origIdent`):
-              when sizeof(`origIdent`) != sizeof(`defIdent`):
+              when ownSizeof(`origIdent`) != ownSizeof(`defIdent`):
                 static: warning("Declaration of " & `origName` & " exists but with different size")
               `origIdent`
             else: `defIdent`))[0]
