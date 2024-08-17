@@ -8,13 +8,18 @@ already wraps most header files without any rewrites or pre-processing and has
 successfully been used to wrap complex projects.
 
 ```nim
-import futhark
+import futhark, strutils
+
+# Remove the `stbi_` prefix since Nim doesn't struggle as much with collisions as C
+proc renameCb(n, k: string, p = ""): string = n.replace "stbi_", ""
 
 # Tell futhark where to find the C libraries you will compile with, and what
 # header files you wish to import.
 importc:
-  path "../stb"
-  define STB_IMAGE_IMPLEMENTATION
+  path "./stb"
+  define STB_IMAGE_IMPLEMENTATION # This define is required by the STB library
+  renameCallback renameCb
+  rename FILE, CFile # Rename `FILE` that STB uses to `CFile` which is the Nim equivalent
   "stb_image.h"
 
 # Tell Nim how to compile against the library. If you have a dynamic library
@@ -22,20 +27,20 @@ importc:
 static:
   writeFile("test.c", """
   #define STB_IMAGE_IMPLEMENTATION
-  #include "../stb/stb_image.h"
+  #include "./stb/stb_image.h"
   """)
 {.compile: "test.c".}
 
 # Use the library just like you would in C!
 var width, height, channels: cint
 
-var image = stbi_load("futhark.png", width.addr, height.addr, channels.addr, STBI_default.cint)
-if image == nil:
+var image = load("futhark.png", width.addr, height.addr, channels.addr, STBI_default.cint)
+if image.isNil:
   echo "Error in loading the image"
   quit 1
 
 echo "Loaded image with a width of ", width, ", a height of ", height, " and ", channels, " channels"
-stbi_image_free(image)
+image_free(image)
 ```
 
 # So are all C wrappers now obsolete?

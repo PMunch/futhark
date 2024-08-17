@@ -1,5 +1,6 @@
 import "../src/futhark", strutils
 
+# Remove the `stbi_` prefix since Nim doesn't struggle as much with collisions as C
 proc renameCb(n, k: string, p = ""): string = n.replace "stbi_", ""
 
 # Tell futhark where to find the C libraries you will compile with, and what
@@ -8,6 +9,7 @@ importc:
   path "./stb"
   define STB_IMAGE_IMPLEMENTATION
   renameCallback renameCb
+  rename FILE, CFile
   "stb_image.h"
 
 # Tell Nim how to compile against the library. If you have a dynamic library
@@ -23,7 +25,7 @@ static:
 var width, height, channels: cint
 
 var image = load("futhark.png", width.addr, height.addr, channels.addr, STBI_default.cint)
-if image == nil:
+if image.isNil:
   echo "Error in loading the image"
   quit 1
 
