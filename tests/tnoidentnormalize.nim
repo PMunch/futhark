@@ -2,7 +2,7 @@ import os, strutils
 
 import ../src/futhark
 
-const outputPath = currentSourcePath.parentDir / "tnoidentnormalize_out.nim"
+const outputPath = currentSourcePath.parentDir / "noidentnormalize_out.nim"
 
 importc:
   path "."
