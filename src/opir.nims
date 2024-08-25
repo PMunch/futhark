@@ -2,7 +2,7 @@ import std/[os, strutils]
 
 when defined(windows):
   # Default LLVM install library path on Windows
-  const libpath = getEnv("ProgramFiles") / "LLVM" / "lib"
+  const libpath = getEnv("ProgramFiles") / "LLVM" / "bin"
   if libpath.dirExists():
     switch("passL", "-L" & quoteShell(libpath))
 elif defined(macosx):
