@@ -1016,7 +1016,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
         fileResult[file].add nnkExportStmt.newTree(newIdentNode(imp.splitFile.name))
     if state.imports.hasKey(file):
-      for imp in state.imports[file] - state.explicitImports[file]:
+      for imp in state.imports[file] - state.explicitImports.getOrDefault(file):
         fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
 
     let cfile = file.changeFileExt("c")
@@ -1106,7 +1106,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       file = file.relativePath(commonPrefix).absolutePath(outputPath)
       outputDir = file.parentDir
       common = futharkCache.relativePath(outputDir)
+      commonExport = futharkCache.splitFile.name
     hint "Writing file " & file
     hostCreateDir(outputDir)
-    writeFile(file.changeFileExt("nim"), "import \"" & common & "\" {.all.}\n\n" & content.repr)
+    writeFile(file.changeFileExt("nim"), "import \"" & common & "\" {.all.}\nexport " & commonExport & "\n\n" & content.repr)
 
