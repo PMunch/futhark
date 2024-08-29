@@ -991,7 +991,11 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       {.hint[XDeclaredButNotUsed]:off.}
       from macros import hint, warning, newLit, getSize
       from os import parentDir
-      macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+      when not declared(ownSizeOf):
+        macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+  elif projectMode:
+    result.add quote do:
+      from os import parentDir
 
   for file in state.files:
     fileResult[file] = newStmtList()
@@ -1001,7 +1005,11 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         {.hint[XDeclaredButNotUsed]:off.}
         from macros import hint, warning, newLit, getSize
         from os import parentDir
-        macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+        when not declared(ownSizeOf):
+          macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+    elif projectMode:
+      result.add quote do:
+        from os import parentDir
 
     if state.explicitImports.hasKey(file):
       for imp in state.explicitImports[file]:
