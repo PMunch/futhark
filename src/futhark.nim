@@ -1011,6 +1011,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       result.add quote do:
         from os import parentDir
 
+    # TODO: Add exists guard
     if state.explicitImports.hasKey(file):
       for imp in state.explicitImports[file]:
         fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
@@ -1105,9 +1106,13 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     let
       file = file.relativePath(commonPrefix).absolutePath(outputPath)
       outputDir = file.parentDir
-      common = futharkCache.relativePath(outputDir)
-      commonExport = futharkCache.splitFile.name
+      common = newLit(futharkCache.relativePath(outputDir))
+      commonExport = newIdentNode(futharkCache.splitFile.name)
+    var fileContent = quote do:
+        import `common` {.all.}
+        export `commonExport`
+    fileContent &= content
     hint "Writing file " & file
     hostCreateDir(outputDir)
-    writeFile(file.changeFileExt("nim"), "import \"" & common & "\" {.all.}\nexport " & commonExport & "\n\n" & content.repr)
+    writeFile(file.changeFileExt("nim"), fileContent.repr)
 
