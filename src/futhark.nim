@@ -991,7 +991,11 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       {.hint[XDeclaredButNotUsed]:off.}
       from macros import hint, warning, newLit, getSize
       from os import parentDir
-      macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+      when not declared(ownSizeOf):
+        macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+  elif projectMode:
+    result.add quote do:
+      from os import parentDir
 
   for file in state.files:
     fileResult[file] = newStmtList()
@@ -1001,14 +1005,19 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         {.hint[XDeclaredButNotUsed]:off.}
         from macros import hint, warning, newLit, getSize
         from os import parentDir
-        macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+        when not declared(ownSizeOf):
+          macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
+    elif projectMode:
+      result.add quote do:
+        from os import parentDir
 
+    # TODO: Add exists guard
     if state.explicitImports.hasKey(file):
       for imp in state.explicitImports[file]:
         fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
         fileResult[file].add nnkExportStmt.newTree(newIdentNode(imp.splitFile.name))
     if state.imports.hasKey(file):
-      for imp in state.imports[file] - state.explicitImports[file]:
+      for imp in state.imports[file] - state.explicitImports.getOrDefault(file):
         fileResult[file].add nnkImportStmt.newTree(nnkPragmaExpr.newTree(newLit(imp), nnkPragma.newTree(newIdentNode("all"))))
 
     let cfile = file.changeFileExt("c")
@@ -1097,8 +1106,13 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     let
       file = file.relativePath(commonPrefix).absolutePath(outputPath)
       outputDir = file.parentDir
-      common = futharkCache.relativePath(outputDir)
+      common = newLit(futharkCache.relativePath(outputDir))
+      commonExport = newIdentNode(futharkCache.splitFile.name)
+    var fileContent = quote do:
+        import `common` {.all.}
+        export `commonExport`
+    fileContent &= content
     hint "Writing file " & file
     hostCreateDir(outputDir)
-    writeFile(file.changeFileExt("nim"), "import \"" & common & "\" {.all.}\n\n" & content.repr)
+    writeFile(file.changeFileExt("nim"), fileContent.repr)
 
