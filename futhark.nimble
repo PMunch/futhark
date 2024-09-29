@@ -6,7 +6,7 @@ description   = "A package which uses libclang to parse C headers into Nim files
 license       = "MIT"
 srcDir        = "src"
 installExt    = @["nim"]
-bin           = @["opir"]
+bin           = @["futhark/opir"]
 
 
 # Dependencies
