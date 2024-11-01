@@ -618,6 +618,10 @@ proc getClangIncludePath*(): string =
     {.warning: "futhark: clang include path not found".}
     ""
 
+proc contains(a, b: NimNode): bool =
+  for v in a:
+    if v == b: return true
+
 macro importc*(imports: varargs[untyped]): untyped =
   ## Generate code from C imports. String literals will be treated as files to
   ## `#include`. Paths can be added with `path <string literal>`, which are
@@ -662,10 +666,14 @@ macro importc*(imports: varargs[untyped]): untyped =
       of "undef":
         defs = nnkInfix.newTree("&".ident, defs, newLit("#undef " & node[1].strVal & "\n"))
       of "path":
-        cargs.add superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
+        let args = superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
+        assert args notin cargs, "path and syspath both handed the same path, or path given twice: " & node[1].repr
+        cargs.add args
         importDirs.add superQuote do: hostAbsolutePath(`node[1]`, getProjectPath())
       of "syspath":
-        cargs.add superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
+        let args = superQuote do: "-I" & hostQuoteShell(hostAbsolutePath(`node[1]`, getProjectPath()))
+        assert args notin cargs, "syspath and path both handed the same path, or syspath given twice: " & node[1].repr
+        cargs.add args
         sysPathDefined = true
       of "ignore":
         ignores.add superQuote do: hostAbsolutePath(`node[1]`, getProjectPath())
