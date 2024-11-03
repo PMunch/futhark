@@ -439,6 +439,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     usedFieldNames: HashSet[string]
     anons = 0
   for field in node["fields"]:
+    if field.hasKey("bitsize") and field["bitsize"].num == 0: continue
     let fieldType =
       if field["type"].kind == JNull:
         lastFieldType
