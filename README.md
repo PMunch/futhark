@@ -434,7 +434,7 @@ To install clang on Windows you need to install
 [LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-15.0.7) (you
 probably want to grab the `LLVM-15.0.7-win64.exe` version). To install clang on
 macOS, run `xcode-select --install` in the terminal. Opir should then detect
-it automatically. Have a look at [opir.nims](src/opir.nims) if you're
+it automatically. Have a look at [opir.nims](src/futhark/opir.nims) if you're
 curious how the Windows and macOS detection works.
 
 If you have Clang installed in your system path you can now simply run:
