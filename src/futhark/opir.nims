@@ -22,7 +22,10 @@ elif defined(linux):
   if fileExists(libpath / "libclang.so"):
     switch("passL", "-L" & libpath)
   else:
-    const libpath2 = staticExec("clang -print-file-name=libclang.so").strip().parentDir()
+    const cmdres = gorgeEx("clang -print-file-name=libclang.so")
+    if cmdres.exitCode != 0:
+      raise newException(LibraryError, $cmdres)
+    const libpath2 = cmdres.output.strip().parentDir()
     if fileExists(libpath2 / "libclang.so"):
       switch("passL", "-L" & libpath2)
 
