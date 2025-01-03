@@ -153,7 +153,7 @@ proc declGuard(name, decl: NimNode): NimNode =
         static: hint("Declaration of " & `name.strVal` & " already exists, not redeclaring")
 
 type
-  RenameCallback = proc(name: string, kind: string, partof = ""): string
+  RenameCallback = proc(name: string, kind: string, allowReuse: var bool, partof = ""): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
   Forward = object
     name: string
@@ -199,9 +199,10 @@ proc isUnsignedNumber(x: string): bool =
     result = false
 
 proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
+  var allowReuse = false
   result = origName
   if not renameCallback.isNil:
-    result = result.renameCallback(kind, partof)
+    result = result.renameCallback(kind, allowReuse, partof)
 
   # These checks should ensure that valid C names which are invalid Nim names get renamed
   if result.startsWith("_"):
@@ -213,15 +214,16 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
     result = result & "private"
   while (let oldLen = result.len; result = result.replace("__", "_"); result.len != oldLen): discard
 
-  # These should ensure all identifiers are unique in Nim
+  # These should ensure all identifiers are unique in Nim.
+  # If allowReuse is true, we will not check if the name is already used.
   var
     normalizedName = result.nimIdentNormalize()
     renamed = false
-  if usedNames.contains(normalizedName) or normalizedName in builtins or normalizedName in systemTypes:
+  if (not allowReuse and usedNames.contains(normalizedName)) or normalizedName in builtins or normalizedName in systemTypes:
     result.add "_" & kind
     normalizedName.add kind
     renamed = true
-  if usedNames.contains(normalizedName) or normalizedName in builtins or normalizedName in systemTypes:
+  if (not allowReuse and usedNames.contains(normalizedName)) or normalizedName in builtins or normalizedName in systemTypes:
     let uniqueTail = hash(origName).uint32.toHex
     result.add "_" & uniqueTail
     normalizedName.add uniqueTail
