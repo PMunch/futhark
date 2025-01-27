@@ -292,8 +292,10 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
   if enumdecl.Cursor_isAnonymous == 0 and not name.startsWith("enum_(anonymous"):
     result["name"] = %name
   discard visitChildren(enumDecl, proc (field, parent: CXCursor, clientData: CXClientData): enumCXChildVisitResult {.cdecl.} =
-    var mainObj = cast[ptr JsonNode](clientData)
-    mainObj[]["fields"].add %*{"name": field.getName, "value": $field.getEnumConstantDeclValue}
+    let fname = field.getName
+    if fname.len != 0:
+      var mainObj = cast[ptr JsonNode](clientData)
+      mainObj[]["fields"].add %*{"name": fname, "value": $field.getEnumConstantDeclValue}
     CXChildVisitContinue
   , result.addr)
 

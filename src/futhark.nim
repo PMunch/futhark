@@ -374,6 +374,9 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
       "pointer".ident
 
 proc createEnum(origName: string, node: JsonNode, state: var State, comment: string) =
+  if node["fields"].len == 0:
+    warning "Ignoring empty enum: " & origName
+    return
   let
     origNameIdent = origName.ident
     name = state.typeDefMap.getOrDefault(origName, origNameIdent) #state.sanitizeName(origName, "enum").ident
