@@ -16,20 +16,21 @@ fObject.close()
 
 # Test default behavior per tnormalize.nim
 doAssert(my_var == 1)
-doAssert(myVarconst == 2) # Renamed as 1st definition collides
-doAssert(myvarconstC690172C == 3) # Renamed as both 1st and 2nd definition collides
+doAssert(myVar_const == 2) # Renamed as 1st definition collides
+doAssert(myvar_const_339F6A06 == 3) # Renamed as both 1st and 2nd definition collides
 doAssert(MYVAR == 4)
-doAssert(MY_VARconst == 5) # Renamed as 4th definition collides
-doAssert(MyVarconst2E4AA817 == 6) # Renamed as 4th and 5th definition collides
-doAssert(My_Varconst038D4D97 == 7) # Renamed as 4th and 5th definiton collides
+doAssert(MY_VAR_const == 5) # Renamed as 4th definition collides
+doAssert(MyVar_const_57AD9D4C == 6) # Renamed as 4th and 5th definition collides
+doAssert(My_Var_const_DE52C234 == 7) # Renamed as 4th and 5th definiton collides
 
 # Manually test identifier case of output
 doAssert " my_var*" in outputText
 doAssert " myVar_const*" in outputText
-doAssert " myvar_const_C690172C*" in outputText
+doAssert " myvar_const_339F6A06*" in outputText
 doAssert " MYVAR*" in outputText
-doAssert " MyVar_const_2E4AA817*" in outputText
-doAssert " My_Var_const_038D4D97*" in outputText
+doAssert " MY_VAR_const*" in outputText
+doAssert " MyVar_const_57AD9D4C*" in outputText
+doAssert " My_Var_const_DE52C234*" in outputText
 
 # `myvar` was renamed in the second name collision, so we can check its 
 # nonexistence in the output file.
