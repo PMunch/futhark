@@ -1,4 +1,4 @@
-import strutils, os, json, posix, options, tables, hashes
+import strutils, os, json, options, tables, hashes
 import termstyle
 import libclang
 
@@ -171,7 +171,7 @@ var
   index = createIndex(0, 0)
   commandLine = allocCStringArray(commandLineParams())
   args = 0
-  fname = getTempDir() / "imports-" & $getPid() & ".h"
+  fname = getTempDir() / "imports-" & $getCurrentProcessID() & ".h"
 while commandLineParams()[args].startsWith "-": inc args
 
 try:
