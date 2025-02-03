@@ -142,18 +142,8 @@ proc exportMark(n: NimNode): NimNode =
   else:
     n
 
-proc declGuard(name, decl: NimNode): NimNode =
-  when nodeclguards:
-    decl
-  else:
-    superQuote do:
-      when not declared(`name`):
-        `decl`
-      else:
-        static: hint("Declaration of " & `name.strVal` & " already exists, not redeclaring")
-
 type
-  RenameCallback = proc(name: string, kind: string, partof = ""): string
+  RenameCallback = proc(name: string, kind: string, partof: string, overloading: var bool): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
   Forward = object
     name: string
@@ -178,6 +168,20 @@ type
     forwards: seq[Forward]
     files: seq[string]
     currentFile: string
+    overloading: Table[string, bool]
+
+proc declGuard(state: State, name, decl: NimNode): NimNode =
+  when nodeclguards:
+    decl
+  else:
+    if state.overloading.getOrDefault(name.strVal, false):
+      decl
+    else:
+      superQuote do:
+        when not declared(`name`):
+          `decl`
+        else:
+          static: hint("Declaration of " & `name.strVal` & " already exists, not redeclaring")
 
 proc addExtraType(state: var State, file: string, node: NimNode) =
   let file = if file in state.files: file else: ""
@@ -198,10 +202,11 @@ proc isUnsignedNumber(x: string): bool =
   except ValueError:
     result = false
 
-proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof = ""): string {.compileTime.} =
+proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof: string, overloading: var Table[string, bool]): string {.compileTime.} =
   result = origName
+  var overloadingState = false
   if not renameCallback.isNil:
-    result = result.renameCallback(kind, partof)
+    result = result.renameCallback(kind, partof, overloadingState)
 
   # These checks should ensure that valid C names which are invalid Nim names get renamed
   if result.startsWith("_"):
@@ -217,11 +222,11 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
   var
     normalizedName = result.nimIdentNormalize()
     renamed = false
-  if usedNames.contains(normalizedName) or normalizedName in builtins or normalizedName in systemTypes:
+  if (usedNames.contains(normalizedName) and not overloadingState) or (kind == "proc" and normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
     result.add "_" & kind
     normalizedName.add kind
     renamed = true
-  if usedNames.contains(normalizedName) or normalizedName in builtins or normalizedName in systemTypes:
+  if (usedNames.contains(normalizedName) and not overloadingState) or (kind == "proc" and normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
     let uniqueTail = hash(origName).uint32.toHex
     result.add "_" & uniqueTail
     normalizedName.add uniqueTail
@@ -229,10 +234,11 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
   if renamed:
     hint "Renaming \"" & origName & "\" to \"" & result & "\"" & (if partof.len != 0: " in " & partof else: "")
   usedNames.incl normalizedName
+  overloading[result] = overloadingState
 
 proc sanitizeName(state: var State, origName: string, kind: string): string {.compileTime.} =
   if not state.renamed.hasKey(origName):
-    result = sanitizeName(state.usedNames, origName, kind, state.renameCallback)
+    result = sanitizeName(state.usedNames, origName, kind, state.renameCallback, partof = "", state.overloading)
     state.renamed[origName] = result
   else:
     result = state.renamed[origName]
@@ -339,7 +345,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         usedFields: HashSet[string]
       for arg in json["arguments"]:
         let
-          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg", state.renameCallback) else: "a" & $i
+          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg", state.renameCallback, "", state.overloading) else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
           if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias":
@@ -390,13 +396,13 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       value = parseInt(field["value"].str)
       fname = state.sanitizeName(field["name"].str, "enumval").ident
     if origName.len == 0:
-      consts.add fname.declGuard(superQuote do:
+      consts.add state.declGuard(fname, superQuote do:
         const `fname`* = `baseType`(`newLit(value)`))
     else:
       if not values.hasKey(value):
         values[value] = fname
       else:
-        consts.add fname.declGuard(superQuote do:
+        consts.add state.declGuard(fname, superQuote do:
           const `fname`* = `name`.`values[value]`)
     state.addKnown field["name"].str
   if origName.len != 0:
@@ -455,14 +461,14 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     let (saneFieldName, fname) =
       if field.hasKey("name") and field["name"].str.len != 0:
         let
-          saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName)
+          saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName, state.overloading)
           fname =
             if state.fieldRenames.hasKey(origName):
               state.fieldRenames[origName].getOrDefault(field["name"].str, saneFieldName)
             else: saneFieldName
         (saneFieldName, fname)
       else:
-        let name = usedFieldNames.sanitizeName("anon" & $anons, "field", state.renameCallback, partof = saneName)
+        let name = usedFieldNames.sanitizeName("anon" & $anons, "field", state.renameCallback, partof = saneName, state.overloading)
         inc anons
         (name, name)
     let fident =
@@ -538,7 +544,7 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
     newEmptyNode()
   )
   if echoDef: echo def.repr
-  state.addProc node["file"].str,  nameIdent.declGuard(def)
+  state.addProc node["file"].str,  state.declGuard(nameIdent, def)
 
 proc createVar(origName: string, node: JsonNode, state: var State) =
   let
@@ -549,7 +555,7 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
     of "external": nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(origName)))
     else: Empty()
   let pragmaExpr = nnkPragmaExpr.newTree(nameIdent.postfix "*", pragmas)
-  state.addProc node["file"].str, nameIdent.declGuard(quote do:
+  state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
     var `pragmaExpr`: `typeIdent`)
 
 proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
@@ -589,7 +595,7 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
     let newConstTypeStmt = parseStmt("type " & state.renamed[origName] & "* = " & value.repr & " ## " & comment)
     let renamed = state.renamed.getOrDefault(node["type"]["value"].str, node["type"]["value"].str)
     if (state.typeNameMap.hasKey(renamed) or state.knownValues.contains renamed):
-      state.addProc node["file"].str, nameIdent.declGuard(quote do:
+      state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
         when `value` is typedesc:
           `newConstTypeStmt`
         else:
@@ -599,7 +605,7 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
             `newLetValueStmt`)
   else:
     state.addKnown origName
-    state.addProc node["file"].str, nameIdent.declGuard(quote do:
+    state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
       when `value` is static:
         `newConstValueStmt`
       else:
@@ -1066,7 +1072,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         origIdent = state.renamed[o].ident
         ident = state.typeDefMap.getOrDefault(o, origIdent)
       var file = if state.entities.hasKey(o): state.entities[o]["file"].str else: ""
-      resultAdd file, origIdent.declGuard(quote do:
+      resultAdd file, state.declGuard(origIdent, quote do:
         type
           `ident`* = object)
 
@@ -1100,7 +1106,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       let
         origIdent = state.renamed[name].ident
         file = state.entities[name]["file"].str
-      resultAdd file, origIdent.declGuard(quote do:
+      resultAdd file, state.declGuard(origIdent, quote do:
         type
            `origIdent`* = `defIdent`)
 
