@@ -11,7 +11,7 @@ successfully been used to wrap complex projects.
 import futhark, strutils
 
 # Remove the `stbi_` prefix since Nim doesn't struggle as much with collisions as C
-proc renameCb(n, k: string, p = ""): string = n.replace "stbi_", ""
+proc renameCb(n, k: string, p: string, overloading: var bool): string = n.replace "stbi_", ""
 
 # Tell futhark where to find the C libraries you will compile with, and what
 # header files you wish to import.
@@ -241,14 +241,18 @@ postfixes, or other similar things you can use a rename callback. This can be
 defined by adding `renameCallback <procedure name>` to your `importc` block. The
 signature of the callback is:
 ```
-proc(name: string, kind: string, partof = ""): string
+proc(name: string, kind: string, partof: string, overloading: var bool): string
 ```
 where `name` is the original name as present in the C code, `kind` is the kind
 of the identifier such as "enum", "proc", "arg", "field", etc. The argument
 `partof` is only used for field names in a structure.
 
-Please note that in order to avoid name collisions the normal anti-collision
-transformations are done after the rename callback.
+In order to avoid name collisions the normal anti-collision transformations are
+done after the rename callback. And if not disabled the resulting checks would
+also have declaration guards preventing overloading. To circumvent this you can
+set `overloading = true` in your `renameCallback` on a per-identifier level to
+allow for example functions to overload each other or other pre-existing
+identifiers.
 
 ### Øpir callbacks
 In case you face issues that aren't easily solveable there is one last option
