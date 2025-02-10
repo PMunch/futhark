@@ -222,11 +222,11 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
   var
     normalizedName = result.nimIdentNormalize()
     renamed = false
-  if (usedNames.contains(normalizedName) and not overloadingState) or (kind == "proc" and normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
+  if (usedNames.contains(normalizedName) and not overloadingState) or (normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
     result.add "_" & kind
     normalizedName.add kind
     renamed = true
-  if (usedNames.contains(normalizedName) and not overloadingState) or (kind == "proc" and normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
+  if (usedNames.contains(normalizedName) and not overloadingState) or (normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
     let uniqueTail = hash(origName).uint32.toHex
     result.add "_" & uniqueTail
     normalizedName.add uniqueTail
