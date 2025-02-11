@@ -143,7 +143,19 @@ proc exportMark(n: NimNode): NimNode =
     n
 
 type
-  RenameCallback = proc(name: string, kind: string, partof: string, overloading: var bool): string
+  SymbolKind* = enum
+    Anon = "anon"
+    Argument = "arg"
+    Proc = "proc"
+    Struct = "struct"
+    Union = "union"
+    Enum = "enum"
+    EnumVal = "enumval"
+    Typedef = "typedef"
+    Field = "field"
+    Variable = "var"
+    Const = "const"
+  RenameCallback = proc(name: string, kind: SymbolKind, partof: string, overloading: var bool): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
   Forward = object
     name: string
@@ -202,7 +214,7 @@ proc isUnsignedNumber(x: string): bool =
   except ValueError:
     result = false
 
-proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string, renameCallback: RenameCallback, partof: string, overloading: var Table[string, bool]): string {.compileTime.} =
+proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: SymbolKind, renameCallback: RenameCallback, partof: string, overloading: var Table[string, bool]): string {.compileTime.} =
   result = origName
   var overloadingState = false
   if not renameCallback.isNil:
@@ -222,11 +234,11 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
   var
     normalizedName = result.nimIdentNormalize()
     renamed = false
-  if (usedNames.contains(normalizedName) and not overloadingState) or (normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
-    result.add "_" & kind
-    normalizedName.add kind
+  if (usedNames.contains(normalizedName) and not overloadingState) or (normalizedName in builtins) or (kind == Typedef and normalizedName in systemTypes):
+    result.add "_" & $kind
+    normalizedName.add $kind
     renamed = true
-  if (usedNames.contains(normalizedName) and not overloadingState) or (normalizedName in builtins) or (kind == "typedef" and normalizedName in systemTypes):
+  if (usedNames.contains(normalizedName) and not overloadingState) or (normalizedName in builtins) or (kind == Typedef and normalizedName in systemTypes):
     let uniqueTail = hash(origName).uint32.toHex
     result.add "_" & uniqueTail
     normalizedName.add uniqueTail
@@ -236,7 +248,7 @@ proc sanitizeName(usedNames: var HashSet[string], origName: string, kind: string
   usedNames.incl normalizedName
   overloading[result] = overloadingState
 
-proc sanitizeName(state: var State, origName: string, kind: string): string {.compileTime.} =
+proc sanitizeName(state: var State, origName: string, kind: SymbolKind): string {.compileTime.} =
   if not state.renamed.hasKey(origName):
     result = sanitizeName(state.usedNames, origName, kind, state.renameCallback, partof = "", state.overloading)
     state.renamed[origName] = result
@@ -244,7 +256,7 @@ proc sanitizeName(state: var State, origName: string, kind: string): string {.co
     result = state.renamed[origName]
 
 proc sanitizeName(state: var State, x: JsonNode): string {.compileTime.} =
-  state.sanitizeName(x["name"].str, x["kind"].str)
+  state.sanitizeName(x["name"].str, x["kind"].str.parseEnum[:SymbolKind])
 
 proc findAlias(kind: JsonNode): string =
   case kind["kind"].str:
@@ -345,7 +357,7 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         usedFields: HashSet[string]
       for arg in json["arguments"]:
         let
-          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, "arg", state.renameCallback, "", state.overloading) else: "a" & $i
+          aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, Argument, state.renameCallback, "", state.overloading) else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
           if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias":
@@ -394,7 +406,7 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
   for field in node["fields"]:
     let
       value = parseInt(field["value"].str)
-      fname = state.sanitizeName(field["name"].str, "enumval").ident
+      fname = state.sanitizeName(field["name"].str, EnumVal).ident
     if origName.len == 0:
       consts.add state.declGuard(fname, superQuote do:
         const `fname`* = `baseType`(`newLit(value)`))
@@ -461,14 +473,14 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     let (saneFieldName, fname) =
       if field.hasKey("name") and field["name"].str.len != 0:
         let
-          saneFieldName = usedFieldNames.sanitizeName(field["name"].str, "field", state.renameCallback, partof = saneName, state.overloading)
+          saneFieldName = usedFieldNames.sanitizeName(field["name"].str, Field, state.renameCallback, partof = saneName, state.overloading)
           fname =
             if state.fieldRenames.hasKey(origName):
               state.fieldRenames[origName].getOrDefault(field["name"].str, saneFieldName)
             else: saneFieldName
         (saneFieldName, fname)
       else:
-        let name = usedFieldNames.sanitizeName("anon" & $anons, "field", state.renameCallback, partof = saneName, state.overloading)
+        let name = usedFieldNames.sanitizeName("anon" & $anons, Field, state.renameCallback, partof = saneName, state.overloading)
         inc anons
         (name, name)
     let fident =
@@ -947,7 +959,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
           state.typeDefMap[name] = bindSym("void")
           state.typeNameMap[name] = bindSym("void")
     else:
-      state.typeNameMap[name] = state.sanitizeName(name, "anon").ident
+      state.typeNameMap[name] = state.sanitizeName(name, Anon).ident
 
   hint "Add name changes"
   # Add explicit type name changes

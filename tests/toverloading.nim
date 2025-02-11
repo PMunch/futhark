@@ -3,7 +3,7 @@ import strutils
 
 {.emit: "#include \"toverloading.h\"".}
 
-proc renameCallback(name: string, kind: string, partof: string, overloading: var bool): string =
+proc renameCallback(name: string, kind: SymbolKind, partof: string, overloading: var bool): string =
   result = name
   if result in ["setFoo", "setBar"]:
     result = "set"

@@ -1,7 +1,7 @@
 import "../src/futhark", strutils
 
 # Remove the `stbi_` prefix since Nim doesn't struggle as much with collisions as C
-proc renameCb(n, k, p: string, overloading: var bool): string = n.replace "stbi_", ""
+proc renameCb(n: string, k: SymbolKind, p: string, overloading: var bool): string = n.replace "stbi_", ""
 
 # Tell futhark where to find the C libraries you will compile with, and what
 # header files you wish to import.
