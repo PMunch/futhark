@@ -155,6 +155,7 @@ type
     Field = "field"
     Variable = "var"
     Const = "const"
+  PragmasCallback = proc(name: string, kind: SymbolKind, pragmas: var seq[NimNode])
   RenameCallback = proc(name: string, kind: SymbolKind, partof: string, overloading: var bool): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
   Forward = object
@@ -177,6 +178,7 @@ type
     explicitImports: Table[string, HashSet[string]]
     imports: Table[string, HashSet[string]]
     renameCallback: RenameCallback
+    pragmasCallback: PragmasCallback
     forwards: seq[Forward]
     files: seq[string]
     currentFile: string
@@ -426,7 +428,12 @@ proc createEnum(origName: string, node: JsonNode, state: var State, comment: str
       dummy = enum ## """ & comment & """
         ## This doesn't work for some reason
         dummy""")[0][0]
-    typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))))
+
+    var pragmas = @[nnkExprColonExpr.newTree("size".ident, nnkCall.newTree("sizeof".ident, baseType))]
+    if not state.pragmasCallback.isNil:
+      state.pragmasCallback(origName, Enum, pragmas)
+
+    typedef[0] = nnkPragmaExpr.newTree(name.postfix "*", nnkPragma.newTree(pragmas))
     typedef[2] = enumTy
     state.addExtraType(node["file"].str, quote do:
       type
@@ -444,6 +451,9 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
 
     if node.hasKey("packed") and node["packed"].bval == true:
       pragmas.add "packed".ident
+
+    if not state.pragmasCallback.isNil:
+      state.pragmasCallback(origName, if node["kind"].str == "union": Union else: Struct, pragmas)
 
     if pragmas.len > 0:
       nnkPragmaExpr.newTree(coreName, nnkPragma.newTree(pragmas))
@@ -529,29 +539,34 @@ proc createProc(origName: string, node: JsonNode, state: var State) =
   var
     def = node.toNimType(state)
     echoDef = false
+    pragmas = def[1].children.toSeq
   block forwardBlock:
     for forward in state.forwards:
       if state.renamed[forward.name] == state.renamed[origName]:
-        def[1].add nnkExprColonExpr.newTree("exportc".ident, newLit(origName))
+        pragmas.add nnkExprColonExpr.newTree("exportc".ident, newLit(origName))
         if appType == "lib":
-          def[1].add "dynlib".ident
+          pragmas.add "dynlib".ident
         for extra in forward.extraPragmas:
-          let pragmas = extra.parseExpr
-          if pragmas.kind == nnkTupleConstr:
-            for pragma in pragmas:
-              def[1].add pragma
+          let parsedPragmas = extra.parseExpr
+          if parsedPragmas.kind == nnkTupleConstr:
+            for pragma in parsedPragmas:
+              pragmas.add pragma
           else:
-            def[1].add pragmas
+            pragmas.add parsedPragmas
         if echoForwards:
           echoDef = true
         break forwardblock
-    def[1].add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
+    pragmas.add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
+  
+  if not state.pragmasCallback.isNil:
+    state.pragmasCallback(origName, Proc, pragmas)
+
   def = nnkProcDef.newTree(
     nameIdent.postfix "*",
     newEmptyNode(),
     newEmptyNode(),
     def[0],
-    def[1],
+    nnkPragma.newTree(pragmas),
     newEmptyNode(),
     newEmptyNode()
   )
@@ -623,6 +638,29 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
       else:
         `newLetValueStmt`)
 
+proc createTypedef(origName: string, node: JsonNode, state: var State, comment: string) =
+  var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
+  newType[0] = state.typeDefMap[node["name"].str].exportMark
+  var pragmas: seq[NimNode]
+  if node["type"]["kind"].str == "vector":
+    pragmas.add nnkExprColonExpr.newTree("importc".ident, newLit(origName))
+  if not state.pragmasCallback.isNil:
+    state.pragmasCallback(origName, Typedef, pragmas)
+  if pragmas.len != 0:
+    newType[0] = nnkPragmaExpr.newTree(newType[0], nnkPragma.newTree(pragmas))
+  newType[^1] = node["type"].toNimType(state)
+  if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
+    return
+  state.addType node["file"].str, newType
+  var pointsTo = node["type"]
+  if pointsTo["kind"].str == "pointer":
+    pointsTo = pointsTo["base"]
+  if pointsTo["kind"].str == "alias" and state.entities.hasKey(pointsTo["value"].str):
+    pointsTo = state.entities[pointsTo["value"].str]
+    if pointsTo.hasKey("file") and pointsTo["file"] != node["file"]:
+      state.imports.mgetOrPut(node["file"].str, initHashSet[string]()).incl(
+        pointsTo["file"].str.relativePath(node["file"].str.parentDir).changeFileExt("nim"))
+
 proc createImport(node: JsonNode, state: var State) =
   if node["import"].str in state.files and node["file"].str in state.files:
     state.explicitImports.mgetOrPut(node["file"].str, initHashSet[string]()).incl node["import"].str.relativePath(node["file"].str.parentDir).changeFileExt("")
@@ -670,6 +708,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     renames: seq[FromTo]
     retypes: seq[FromTo]
     renameCallback = newNilLit()
+    pragmasCallback = newNilLit()
     opircallbacks = nnkPrefix.newTree(newIdentNode("@"), nnkBracket.newTree())
     forwards = nnkPrefix.newTree(newIdentNode("@"), nnkBracket.newTree())
     sysPathDefined = false
@@ -711,6 +750,8 @@ macro importc*(imports: varargs[untyped]): untyped =
         retypes.add (f: node[1].repr, t: node[2].repr)
       of "renamecallback":
         renameCallback = node[1]
+      of "pragmascallback":
+        pragmasCallback = node[1]
       of "addopircallback":
         opircallbacks[1].add node[1]
       of "outputpath":
@@ -735,7 +776,7 @@ macro importc*(imports: varargs[untyped]): untyped =
     let clangIncludePath = getClangIncludePath()
     if clangIncludePath != "":
       cargs.add newLit("-I" & hostQuoteShell(clangIncludePath))
-  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `ignores`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), `forwards`)
+  result.add quote do: importcImpl(`defs`, `outputPath`, `cargs`, `files`, `importDirs`, `ignores`, `renames`, `retypes`, RenameCallback(`renameCallback`), OpirCallbacks(`opirCallbacks`), PragmasCallback(`pragmasCallback`), `forwards`)
 
 proc hash*(n: NimNode): Hash = hash(n.treeRepr)
 
@@ -780,7 +821,7 @@ proc getCommonPrefix(strs: openArray[string]): string =
         break
   strs[0][0..lastSlash]
 
-macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs, ignores: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], forwards: static[openArray[Forward]]): untyped =
+macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs, ignores: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], pragmasCallback: static[PragmasCallback], forwards: static[openArray[Forward]]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
   ## be converted is compiled with `compilerArguments` passed directly to clang.
@@ -800,6 +841,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       #procs: newStmtList(),
       #extraTypes: newStmtList(),
       renameCallback: renameCallback,
+      pragmasCallback: pragmasCallback,
       forwards: forwards.toSeq)
 
   let
@@ -829,11 +871,13 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     cmd = "opir " & compilerArguments.toSeq.join(" ") & " " & fname.hostQuoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
+    pragmasCallbackSym = quote: `pragmasCallback`
     opirCallbackSyms = opirCallbacks.mapIt(quote do: `it`)
     fullHash = !$(hash(nodeclguards) !& hash(noopaquetypes) !& hash(exportall) !&
       hash(generateInline) !& hash(preAnsiFuncDecl) !& hash(renames) !&
       hash(retypes) !& opirHash !&
       hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash) !&
+      hash(if pragmasCallback.isNil: "" else: pragmasCallbackSym[0].symBodyHash) !&
       (if forwards.len != 0: forwards.mapIt(hash(it)).foldl(a !& b) else: hash("")) !&
       (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it[0].symBodyHash)).foldl(a !& b) else: hash("")))
     futharkCache = if outputPath.len == 0: cacheDir / "futhark_" & fullHash.toHex & ".nim"
@@ -981,22 +1025,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       of "struct", "union":
         createStruct(node["name"].str, state.renamed[node["name"].str], node, state, comment)
       of "typedef":
-        var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
-        newType[0] = state.typeDefMap[node["name"].str].exportMark
-        if node["type"]["kind"].str == "vector":
-          newType[0] = nnkPragmaExpr.newTree(newType[0], nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(node["name"].str))))
-        newType[^1] = node["type"].toNimType(state)
-        if newType[^1].kind == nnkIdent and newType[^1].strVal == "void":
-          continue
-        state.addType node["file"].str, newType
-        var pointsTo = node["type"]
-        if pointsTo["kind"].str == "pointer":
-          pointsTo = pointsTo["base"]
-        if pointsTo["kind"].str == "alias" and state.entities.hasKey(pointsTo["value"].str):
-          pointsTo = state.entities[pointsTo["value"].str]
-          if pointsTo.hasKey("file") and pointsTo["file"] != node["file"]:
-            state.imports.mgetOrPut(node["file"].str, initHashSet[string]()).incl(
-              pointsTo["file"].str.relativePath(node["file"].str.parentDir).changeFileExt("nim"))
+        createTypedef(node["name"].str, node, state, comment)
       of "enum":
         createEnum(node["name"].str, node, state, comment)
       of "proc":
