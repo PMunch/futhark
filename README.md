@@ -11,7 +11,8 @@ successfully been used to wrap complex projects.
 import futhark, strutils
 
 # Remove the `stbi_` prefix since Nim doesn't struggle as much with collisions as C
-proc renameCb(n, k: string, p: string, overloading: var bool): string = n.replace "stbi_", ""
+proc renameCb(n: string, k: SymbolKind, p: string, overloading: var bool): string =
+  n.replace "stbi_", ""
 
 # Tell futhark where to find the C libraries you will compile with, and what
 # header files you wish to import.
@@ -148,6 +149,7 @@ string denoting what kind of identifier this is, and an optional string
 denoting which object or procedure this identifier occurs in, and which returns
 a new string. This callback will be inserted into the renaming logic and will
 be called on the original C identifier before all the other rules are applied.
+See the Deeper control > Rename callback section for more information.
 
 ## Redefining types
 C tends to use a lot of void pointers, pointers to characters, and pointers to
@@ -241,10 +243,10 @@ postfixes, or other similar things you can use a rename callback. This can be
 defined by adding `renameCallback <procedure name>` to your `importc` block. The
 signature of the callback is:
 ```
-proc(name: string, kind: string, partof: string, overloading: var bool): string
+proc(name: string, kind: SymbolKind, partof: string, overloading: var bool): string
 ```
 where `name` is the original name as present in the C code, `kind` is the kind
-of the identifier such as "enum", "proc", "arg", "field", etc. The argument
+of the identifier such as `Enum`, `Proc`, `Arg`, `Field`, etc. The argument
 `partof` is only used for field names in a structure.
 
 In order to avoid name collisions the normal anti-collision transformations are
@@ -253,6 +255,24 @@ also have declaration guards preventing overloading. To circumvent this you can
 set `overloading = true` in your `renameCallback` on a per-identifier level to
 allow for example functions to overload each other or other pre-existing
 identifiers.
+
+### Pragma callback
+If you want to add a pragma to anything Futhark outputs you can add
+`pragmasCallback <procedure name>` to your `importc` block. The signature of the
+callback is:
+
+```
+proc(name: string, kind: SymbolKind, pragmas: var seq[NimNode])
+```
+
+The `name` and `kind` arguments are the same as for the `renameCallback`, and
+`pragmas` is a list of pragmas that will be added. This list will be
+pre-populated with the pragmas Futhark already attaches, and can be completely
+modified in the callback. Futhark will not perform any further checks on the
+pragmas you put in the sequence. This can be useful if you want to e.g. add
+`discardable` to procedures that would be safe to ignore the return value of. It
+would also be possible to attach custom pragmas or macros and this way
+completely redefine the definition.
 
 ### Øpir callbacks
 In case you face issues that aren't easily solveable there is one last option
