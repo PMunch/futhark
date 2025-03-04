@@ -1048,13 +1048,13 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     result.add quote do:
       {.warning[UnusedImport]:off.}
       {.hint[XDeclaredButNotUsed]:off.}
-      from macros import hint, warning, newLit, getSize
-      from os import parentDir
+      from std/macros import hint, warning, newLit, getSize
+      from std/os import parentDir
       when not declared(ownSizeOf):
         macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
   elif projectMode:
     result.add quote do:
-      from os import parentDir
+      from std/os import parentDir
 
   for file in state.files:
     fileResult[file] = newStmtList()
@@ -1062,13 +1062,13 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       fileResult[file].add quote do:
         {.warning[UnusedImport]:off.}
         {.hint[XDeclaredButNotUsed]:off.}
-        from macros import hint, warning, newLit, getSize
-        from os import parentDir
+        from std/macros import hint, warning, newLit, getSize
+        from std/os import parentDir
         when not declared(ownSizeOf):
           macro ownSizeof(`xIdent`: typed): untyped = newLit(`xIdent`.getSize) # This returns negative numbers on errors instead of erroring out
     elif projectMode:
       result.add quote do:
-        from os import parentDir
+        from std/os import parentDir
 
     # TODO: Add exists guard
     if state.explicitImports.hasKey(file):
