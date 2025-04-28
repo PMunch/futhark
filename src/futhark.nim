@@ -500,8 +500,9 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
         nnkPragmaExpr.newTree(fname.ident.postfix "*", nnkPragma.newTree(nnkExprColonExpr.newTree("bitsize".ident, newLit(field["bitsize"].num))))
       else:
         fname.ident.postfix "*"
-    if state.retypes.hasKey(saneName) and state.retypes[saneName].hasKey(fname):
-      newType[^1][^1].add newIdentDefs(fident, state.retypes[saneName][fname])
+    let normalizedName = saneName.nimIdentNormalize
+    if state.retypes.hasKey(normalizedName) and state.retypes[normalizedName].hasKey(fname):
+      newType[^1][^1].add newIdentDefs(fident, state.retypes[normalizedName][fname])
     else:
       if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias":
         state.addOpaque fieldType["base"]["value"].str
