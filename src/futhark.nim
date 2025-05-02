@@ -38,6 +38,7 @@ const
     "csize", "AllocStats", "GC_Strategy", "PFrame", "TFrame", "ForeignCell",
     "Channel", "BackwardsIndex", "NimNode", "ForLoopStmt"]
   syspaths {.strdefine.} = ""
+  opirBin {.strdefine.} = "opir"
   nodeclguards = defined(nodeclguards)
   noopaquetypes = defined(noopaquetypes)
   exportall = defined(exportall) or nodeclguards
@@ -869,7 +870,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       files
     cacheDir = querySetting(nimcacheDir)
     fname = cacheDir / "futhark-includes.h"
-    cmd = "opir " & compilerArguments.toSeq.join(" ") & " " & fname.hostQuoteShell()
+    cmd = opirBin & " " & compilerArguments.toSeq.join(" ") & " " & fname.hostQuoteShell()
     opirHash = hash(defs) !& hash(cmd) !& hash(VERSION)
     renameCallbackSym = quote: `renameCallback`
     pragmasCallbackSym = quote: `pragmasCallback`
