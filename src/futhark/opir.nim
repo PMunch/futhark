@@ -419,10 +419,6 @@ proc genVarDecl(vardecl: CXCursor): JsonNode =
   let varType = varDecl.getCursorType
   let isConst = varType.isconstqualifiedtype() != 0
 
-  # Debug: log linkage and const status for specific variables (disabled by default)
-  # if varName.startsWith("orxFLOAT") or varName.startsWith("orxDOUBLE") or varName.contains("UNDEFINED"):
-  #   stderr.writeLine("DEBUG: " & varName & " linkage=" & linkage & " isConst=" & $isConst)
-
   # Check if this is a static const variable (file-scope constant)
   # Note: file-scope static consts can have either NoLinkage or Internal linkage
   if (cursorLinkage == CXLinkage_NoLinkage or cursorLinkage == CXLinkage_Internal) and isConst:
