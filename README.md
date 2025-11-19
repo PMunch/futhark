@@ -452,8 +452,8 @@ get fixed up over time.
 # Installation
 To install Futhark you first need to have clang installed. Installing clang on
 Linux is as simple as just grabbing it from your package manager (e.g. 
-(Debian-based distributions: `sudo apt install clang libclang-dev`,
-Void Linux: `sudo xbps-install clang clang17-devel libclang`). 
+Debian-based distributions: `sudo apt install clang libclang-dev`,
+Void Linux: `sudo xbps-install clang clang21-devel libclang`). 
 To install clang on Windows you need to install
 [LLVM](https://github.com/llvm/llvm-project/releases/tag/llvmorg-15.0.7) (you
 probably want to grab the `LLVM-15.0.7-win64.exe` version). To install clang on
