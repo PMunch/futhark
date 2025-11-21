@@ -43,5 +43,13 @@ elif defined(linux):
     const libpath2 = cmdres.output.strip().parentDir()
     if fileExists(libpath2 / "libclang.so"):
       switch("passL", "-L" & libpath2)
+elif defined(freebsd):
+  # Path prefix is never the same so we grab from llvm-config
+  const cmdres = gorgeEx("llvm-config --libdir")
+  if cmdres.exitCode != 0:
+    raise newException(LibraryError, $cmdres)
+  const libpath = cmdres.output.strip()
+  if fileExists(libpath / "libclang.so"):
+    switch("passL", "-L" & libpath)
 
 switch("passL", "-lclang")
