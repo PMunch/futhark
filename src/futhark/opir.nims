@@ -51,5 +51,15 @@ elif defined(freebsd):
   const libpath = cmdres.output.strip()
   if fileExists(libpath / "libclang.so"):
     switch("passL", "-L" & libpath)
+elif defined(openbsd):
+  # lib never has the same file name and similar paths to FreeBSD
+  const cmdres = gorgeEx("pkg_info -L llvm | grep libclang.so")
+  if cmdres.exitCode != 0:
+    raise newException(LibraryError, $cmdres)
+  const libpath = cmdres.output.strip()
+  # libpath already contains name of lib file
+  if fileExists(libpath):
+    # parentDir() happens here instead of separate variable
+    switch("passL", "-L" & libpath.parentDir())
 
 switch("passL", "-lclang")
