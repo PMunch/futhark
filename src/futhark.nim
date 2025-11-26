@@ -948,6 +948,12 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   hint "Gathering symbols"
   # Gather symbols from first level of hierarchy
   for node in fut:
+    # Handle warnings from opir (e.g., untranslatable static const variables)
+    if node.hasKey("kind") and node["kind"].str == "warning":
+      if node.hasKey("message"):
+        hint node["message"].str
+      continue
+
     let name = if node.hasKey("name"): node["name"].str else: ""
     if node.hasKey("name"):
       state.addEntity(name, node)
