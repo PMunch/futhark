@@ -2,9 +2,12 @@ import std/[os, strutils]
 
 when defined(windows):
   # Default LLVM install library path on Windows
-  const libpath = getEnv("ProgramFiles") / "LLVM" / "bin"
+  const libpath = getEnv("ProgramFiles") / "LLVM" / "lib"
   if libpath.dirExists():
-    switch("passL", "-L" & quoteShell(libpath))
+    when defined(vcc):
+      switch("passL", "/link /LIBPATH:" & quoteShell(libpath))
+    else:
+      switch("passL", "-L" & quoteShell(libpath))
 elif defined(macosx):
   # Try command-line tools lib path first
   const libpath = "/Library/Developer/CommandLineTools/usr/lib"
@@ -62,4 +65,7 @@ elif defined(openbsd):
     # parentDir() happens here instead of separate variable
     switch("passL", "-L" & libpath.parentDir())
 
-switch("passL", "-lclang")
+when defined(vcc):
+  switch("passL", "libclang.lib")
+else:
+  switch("passL", "-lclang")
