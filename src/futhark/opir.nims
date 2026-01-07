@@ -1,8 +1,9 @@
-import std/[os, strutils]
+import std/os
 
 when defined(windows):
-  # Default LLVM install library path on Windows
-  const libpath = getEnv("ProgramFiles") / "LLVM" / "lib"
+  const binpath = getEnv("LIBCLANG_PATH", getEnv("ProgramFiles")/"LLVM"/"bin")
+  const libpath = binpath.parentDir()/"lib"
+
   if libpath.dirExists():
     when defined(vcc):
       switch("passL", "/link /LIBPATH:" & quoteShell(libpath))
