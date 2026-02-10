@@ -2,6 +2,8 @@ import strutils, os, json, options, tables, hashes
 import termstyle
 import libclang
 
+var fileCache: Table[string, string] # Cache for reading source files
+
 proc `$`(cxstr: CXString): string =
   result = $getCString(cxstr)
   disposeString(cxstr)
@@ -27,6 +29,110 @@ proc getRange(c: CXCursor): tuple[filename: string, line, column: cuint, endline
   ext.getRangeStart.getPresumedLocation(filename.addr, result.line.addr, result.column.addr)
   ext.getRangeEnd.getPresumedLocation(filename.addr, result.endline.addr, result.endcolumn.addr)
   result.filename = $filename
+
+proc getInitializerText(varDecl: CXCursor): Option[string] =
+  ## Extract the source text of a variable's initializer expression
+  let initializer = varDecl.Cursor_getVarDeclInitializer()
+  if initializer.kind == CXCursor_InvalidFile:
+    return none(string)
+
+  let extent = initializer.getCursorExtent()
+  var
+    file: CXFile
+    startOffset, endOffset: cuint
+
+  extent.getRangeStart.getExpansionLocation(file.addr, nil, nil, startOffset.addr)
+  extent.getRangeEnd.getExpansionLocation(file.addr, nil, nil, endOffset.addr)
+
+  if endOffset <= startOffset:
+    return none(string)
+
+  let fname = $file.getFileName()
+  if fname.len == 0:
+    return none(string)
+
+  try:
+    let fileContent = fileCache.mgetOrPut(fname, readFile(fname))
+    let initText = fileContent[startOffset..<endOffset].strip()
+    if initText.len > 0:
+      return some(initText)
+  except:
+    discard
+
+  return none(string)
+
+proc convertInitializerToNim(initText: string): Option[JsonNode] =
+  ## Try to convert a C initializer expression to Nim format
+  ## Returns some(JsonNode) with value and type info, or none() if conversion fails
+  var text = initText.strip()
+
+  # Handle string literals
+  if text.len >= 2 and text[0] == '"' and text[^1] == '"':
+    return some(%*{"value": text[1..^2], "type": {"kind": "base", "value": "cstring"}})
+
+  # Handle character literals
+  if text.len >= 2 and text[0] == '\'' and text[^1] == '\'':
+    return some(%*{"value": text, "type": {"kind": "base", "value": "cchar"}})
+
+  # Try to handle simple numeric literals with suffixes
+  var
+    unsigned = false
+    long = false
+    longlong = false
+    isFloat = false
+    pos = text.high
+
+  # Strip common suffixes (u, l, ll, f, etc.)
+  while pos >= 0 and text[pos] in {'u', 'U', 'l', 'L', 'f', 'F'}:
+    case text[pos]:
+    of 'u', 'U': unsigned = true
+    of 'l', 'L':
+      if long: longlong = true
+      else: long = true
+    of 'f', 'F': isFloat = true
+    else: discard
+    dec pos
+
+  let valueText = text[0..pos]
+
+  # Try parsing as integer
+  if not isFloat:
+    try:
+      var value: BiggestInt
+      if valueText.startsWith("0x") or valueText.startsWith("0X"):
+        value = parseHexInt(valueText.replace("'", ""))
+      elif valueText.startsWith("0b") or valueText.startsWith("0B"):
+        value = parseBinInt(valueText.replace("'", ""))
+      elif valueText.len > 1 and valueText[0] == '0' and valueText[1] in '0'..'9':
+        value = parseOctInt(valueText[1..^1].replace("'", ""))
+      else:
+        value = parseBiggestInt(valueText.replace("'", ""))
+
+      let nimType =
+        if unsigned or long or longlong:
+          %*{"kind": "base", "value": ("c" & (if unsigned: "u" else: "") & (if longlong: "longlong" elif long: "long" else: "int"))}
+        else:
+          %*{"kind": "base", "value": "cint"}
+
+      return some(%*{"value": value, "type": nimType})
+    except:
+      discard
+
+  # Try parsing as float
+  if isFloat or valueText.contains('.') or valueText.contains('e') or valueText.contains('E'):
+    try:
+      let value = parseFloat(valueText.replace("'", ""))
+      let nimType =
+        if isFloat:
+          %*{"kind": "base", "value": "cfloat"}
+        else:
+          %*{"kind": "base", "value": "cdouble"}
+      return some(%*{"value": value, "type": nimType})
+    except:
+      discard
+
+  # For complex expressions (function calls, casts, etc.), we can't easily convert
+  return none(JsonNode)
 
 proc toNimCallingConv(cc: enumCXCallingConv): string =
   case cc:
@@ -301,13 +407,41 @@ proc genEnumDecl(enumdecl: CXCursor): JsonNode =
 
 proc genVarDecl(vardecl: CXCursor): JsonNode =
   let location = getLocation(vardecl)
-  let linkage = case varDecl.getCursorLinkage:
+  let cursorLinkage = varDecl.getCursorLinkage
+  let linkage = case cursorLinkage:
     of CXLinkage_Invalid: "invalid"
     of CXLinkage_NoLinkage: "static"
     of CXLinkage_Internal: "internal"
     of CXLinkage_UniqueExternal: "unique"
     of CXLinkage_External: "external" # This is C `extern`
-  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": varDecl.getName, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
+
+  let varName = varDecl.getName
+  let varType = varDecl.getCursorType
+  let isConst = varType.isconstqualifiedtype() != 0
+
+  # Check if this is a static const variable (file-scope constant)
+  # Note: file-scope static consts can have either NoLinkage or Internal linkage
+  if (cursorLinkage == CXLinkage_NoLinkage or cursorLinkage == CXLinkage_Internal) and isConst:
+    # Try to extract and convert the initializer
+    let initTextOpt = getInitializerText(varDecl)
+    if initTextOpt.isSome:
+      let initText = initTextOpt.get
+      let convertedOpt = convertInitializerToNim(initText)
+      if convertedOpt.isSome:
+        # Successfully converted - generate a const declaration
+        let converted = convertedOpt.get
+        return %*{"kind": "const", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": varName, "value": converted["value"], "type": converted["type"]}
+      else:
+        # Could not convert the initializer - return warning to be displayed by futhark
+        let msg = "Cannot translate initializer for static const '" & varName & "': " & initText & " - skipping"
+        return %*{"kind": "warning", "file": location.filename, "position": {"column": location.column, "line": location.line}, "message": msg}
+    else:
+      # No initializer found - return warning to be displayed by futhark
+      let msg = "No initializer found for static const '" & varName & "' - skipping"
+      return %*{"kind": "warning", "file": location.filename, "position": {"column": location.column, "line": location.line}, "message": msg}
+
+  # Default: generate a var declaration (for non-const variables)
+  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": varName, "linkage": linkage, "type": varType.toNimType}
 
 proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
   let retType = funcDeclType.getResultType
@@ -344,7 +478,6 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
   let funcDeclType = funcDecl.getCursorType
   genProcDecl(funcDeclType, some(funcDecl))
 
-var fileCache: Table[string, string] # TODO: Is there some way to get the macro body so we don't have to do this?
 proc genMacroDecl(macroDef: CXCursor): JsonNode =
   let name = macroDef.getName
   # Hard to get any usable data from this
