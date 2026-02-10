@@ -1,4 +1,4 @@
-import std/os
+import std/[os, strutils]
 
 when defined(windows):
   const binpath = getEnv("LIBCLANG_PATH", getEnv("ProgramFiles")/"LLVM"/"bin")
