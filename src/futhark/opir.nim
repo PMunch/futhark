@@ -307,7 +307,17 @@ proc genVarDecl(vardecl: CXCursor): JsonNode =
     of CXLinkage_Internal: "internal"
     of CXLinkage_UniqueExternal: "unique"
     of CXLinkage_External: "external" # This is C `extern`
-  %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": varDecl.getName, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
+  result = %*{"kind": "var", "file": location.filename, "position": {"column": location.column, "line": location.line}, "name": varDecl.getName, "linkage": linkage, "type": varDecl.getCursorType.toNimType}
+  if vardecl.CursorgetVarDeclInitializer.Cursor_isNull == 0:
+    let evalResult = vardecl.CursorGetVarDeclInitializer.Cursor_Evaluate
+    result["value"] =
+      case evalResult.EvalResultgetKind:
+      of CXEval_Int: %evalResult.EvalResult_getAsInt
+      of CXEval_Float: %evalResult.EvalResult_getAsDouble
+      of CXEval_StrLiteral: %($evalResult.EvalResult_getAsStr)
+      else:
+        stderr.writeLine "Unable literal value kind: ", evalResult.EvalResultgetKind, " ", location
+        return
 
 proc genProcDecl(funcDeclType: CXType, funcDecl = none(CXCursor)): JsonNode =
   let retType = funcDeclType.getResultType

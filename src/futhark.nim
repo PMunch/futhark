@@ -584,8 +584,18 @@ proc createVar(origName: string, node: JsonNode, state: var State) =
     of "external": nnkPragma.newTree(nnkExprColonExpr.newTree("importc".ident, newLit(origName)))
     else: Empty()
   let pragmaExpr = nnkPragmaExpr.newTree(nameIdent.postfix "*", pragmas)
-  state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
-    var `pragmaExpr`: `typeIdent`)
+  if node.hasKey("value") and node["value"].kind in {JInt, JFloat, JString}:
+    let value =
+      case node["value"].kind:
+      of JInt: newLit(node["value"].num)
+      of JFloat: newLit(node["value"].fnum)
+      of JString: newLit(node["value"].str)
+      else: return # Should never happen, guarded by kind check in if statement
+    state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
+      var `pragmaExpr`: `typeIdent` = `typeIdent`(`value`))
+  else:
+    state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
+      var `pragmaExpr`: `typeIdent`)
 
 proc createConst(origName: string, node: JsonNode, state: var State, comment: string) =
   let
