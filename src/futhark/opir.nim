@@ -118,13 +118,14 @@ proc toNimType(ct: CXType): JsonNode =
         newJNull()
     else:
       %*{"kind": "base", "value": base}
-  of CXType_Record:
-    let value = ct.getTypeDeclaration.getName
+  of CXType_Enum:
+    let
+      typeDecl = ct.getTypeDeclaration
+      value = typeDecl.getName
     if value.len != 0:
-      %*{"kind": "alias", "value": value}
+      %*{"kind": "alias", "value": "enum_" & value}
     else:
-      newJNull()
-  of CXType_Enum: %*{"kind": "invalid", "value": "inline enum?"}
+      %*{"kind": "invalid", "value": "inline enum?"}
   of CXType_FunctionProto, CXType_FunctionNoProto:
     ct.genProcDecl()
   of CXType_ConstantArray:
@@ -135,7 +136,7 @@ proc toNimType(ct: CXType): JsonNode =
     %*{"kind": "vector"}
   of CXType_VariableArray, CXType_DependentSizedArray:
     %*{"kind": "invalid", "value": "array?"}
-  of CXType_Elaborated:
+  of CXType_Elaborated, CXType_Record:
     let typeDecl = ct.getTypeDeclaration
     let value = typeDecl.getName
     if typeDecl.getCursorType.kind == CXType_Typedef:
@@ -242,27 +243,29 @@ proc genStructDecl(struct: CXCursor): JsonNode =
   discard visitChildren(struct, proc (field, parent: CXCursor, clientData: CXClientData): enumCXChildVisitResult {.cdecl.} =
     var mainObj = cast[ptr JsonNode](clientData)
     case field.getCursorKind:
-    of CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl, CXCursor_EnumDecl:
+    of CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl, CXCursor_EnumDecl, CXCursor_TypeRef:
       case field.getCursorType.kind:
-      of CXType_Record:
-        let substruct = genStructDecl(field)
-        if substruct["fields"].len != 0:
-          mainObj[]["fields"].add %*{"type": substruct, "typehash": hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex}
       of CXType_Enum:
         mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
-      of CXType_Elaborated:
+      of CXType_Elaborated, CXType_Record:
         if mainObj[]["fields"].elems.len != 0 and
             not mainObj[]["fields"].elems[^1].hasKey("name") and
             mainObj[]["fields"].elems[^1].hasKey("typehash") and
             mainObj[]["fields"].elems[^1]["typehash"].str == hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex:
           mainObj[]["fields"].elems[^1]["name"] = %field.getName
+        elif field.getCursorType.kind == CXType_Record and field.getCursorKind != CXCursor_TypeRef:
+          let substruct = genStructDecl(field)
+          if substruct["fields"].len != 0:
+            mainObj[]["fields"].add %*{"type": substruct, "typehash": hash($field.getCursorType.getTypeDeclaration.getCursorUSR).toHex}
         else:
           mainObj[]["fields"].add %*{"name": field.getName, "type": field.toNimType}
       of CXType_ConstantArray:
         var val = %*{"name": field.getName, "type": field.toNimType}
         template innerKind: untyped = mainObj[]["fields"].elems[^1]["type"]["kind"].str
-        if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name") and
-          startsWith($(field.getCursorType.getElementType.getTypeSpelling), innerKind & " (unnamed " & innerKind & " at"):
+        if mainObj[]["fields"].elems.len != 0 and not mainObj[]["fields"].elems[^1].hasKey("name") and (
+            startsWith($(field.getCursorType.getElementType.getTypeSpelling), innerKind & " (unnamed " & innerKind & " at") or
+            startsWith($(field.getCursorType.getElementType.getTypeSpelling), innerKind & " (unnamed at")
+          ):
           val["type"]["value"] = mainObj[]["fields"].elems[^1]["type"]
           mainObj[]["fields"].elems[^1] = val
         else:
