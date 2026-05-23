@@ -40,7 +40,15 @@ proc toNimCallingConv(cc: enumCXCallingConv): string =
     CXCallingConv_X86_64SysV, CXCallingConv_X86VectorCall,
     CXCallingConv_Swift, CXCallingConv_PreserveMost,
     CXCallingConv_PreserveAll, CXCallingConv_AArch64VectorCall,
-    Cxcallingconvswiftasync, Cxcallingconvaarch64svepcs: "unknownCallingConv"
+    Cxcallingconvswiftasync, Cxcallingconvaarch64svepcs, CXCallingConv_M68kRTD,
+    CXCallingConv_PreserveNone, CXCallingConv_RISCVVectorCall,
+    CXCallingConv_RISCVVLSCall_32, CXCallingConv_RISCVVLSCall_64,
+    CXCallingConv_RISCVVLSCall_128, CXCallingConv_RISCVVLSCall_256,
+    CXCallingConv_RISCVVLSCall_512, CXCallingConv_RISCVVLSCall_1024,
+    CXCallingConv_RISCVVLSCall_2048, CXCallingConv_RISCVVLSCall_4096,
+    CXCallingConv_RISCVVLSCall_8192, CXCallingConv_RISCVVLSCall_16384,
+    CXCallingConv_RISCVVLSCall_32768, CXCallingConv_RISCVVLSCall_65536:
+    "unknownCallingConv"
   of CXCallingConv_Invalid: "invalidCallingConv"
   of CXCallingConv_Unexposed: "unexposedCallingConv"
 
