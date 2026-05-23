@@ -1,4 +1,4 @@
-import strutils, os, json, options, tables, hashes
+import strutils, os, json, options, tables, hashes, osproc
 import termstyle
 import libclang
 
@@ -196,7 +196,7 @@ except Exception as e:
   quit 1
 
 var unit = parseTranslationUnit(index, fname.cstring,
-                              cast[ptr cstring](commandLine), args.cint, nil, 0, CXTranslationUnit_DetailedPreprocessingRecord.cuint or CXTranslationUnit_SkipFunctionBodies.cuint)
+                              cast[ptr cstring](commandLine), args.cint, nil, 0, CXTranslationUnit_DetailedPreprocessingRecord.cuint or CXTranslationUnit_SkipFunctionBodies.cuint or CXTranslationUnit_ForSerialization.cuint)
 deallocCStringArray(commandLine)
 
 var fatal = false
@@ -387,12 +387,13 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
   let startOffset = offset
   extent.getRangeEnd.getExpansionLocation(file.addr, nil, nil, offset.addr)
   if offset - startOffset != name.len.uint32:
-    if macroDef.CursorIsMacroFunctionLike == 0:
-      let fname = $file.getFileName
-      if fname.len != 0:
+    let fname = $file.getFileName
+    if fname.len != 0:
+      let fileContent = fileCache.mgetOrPut(fname, readFile(fname))
+      if macroDef.CursorIsMacroFunctionLike == 0:
         var kind = "unknown"
         let def = block:
-          var def = fileCache.mgetOrPut(fname, readFile(fname))[startOffset+name.len.cuint..<offset].strip
+          var def = fileContent[startOffset+name.len.cuint..<offset].strip
           if def.len > 1:
             # stdint.h macro parser: INT8_C(-5), UINT32_C(123) for example
             let ucpPos = def.find("_C(")
@@ -467,6 +468,7 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
         # TODO; Look at already defined stuff and ensure this is not a type
         if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}) and def[0] notin '0'..'9':
           return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": {"kind": "alias", "value": def}}
+      return %*{"kind": "macrodef", "file": fname, "position": {"column": column, "line": line}, "value": "#define " & fileContent[startOffset..<offset]}
   # Might be useful to read a function signature for function like macros
   #for i in 0..<macroDef.getCursorCompletionString.getNumCompletionChunks:
   #  echo "\t", macroDef.getCursorCompletionString.getCompletionChunkText(i)

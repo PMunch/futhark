@@ -39,6 +39,7 @@ const
     "Channel", "BackwardsIndex", "NimNode", "ForLoopStmt"]
   syspaths {.strdefine.} = ""
   opirBin {.strdefine.} = "opir"
+  c2nimBin {.strdefine.} = "c2nim"
   nodeclguards = defined(nodeclguards)
   noopaquetypes = defined(noopaquetypes)
   exportall = defined(exportall) or nodeclguards
@@ -156,6 +157,7 @@ type
     Field = "field"
     Variable = "var"
     Const = "const"
+    Template = "template"
   PragmasCallback = proc(name: string, kind: SymbolKind, pragmas: var seq[NimNode])
   RenameCallback = proc(name: string, kind: SymbolKind, partof: string, overloading: var bool): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
@@ -986,6 +988,40 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
       else:
         if node["kind"].str == "enum":
           createEnum("", node, state, "")
+        if node["kind"].str == "macrodef":
+          let
+            c2nimInput = cacheDir / "c2nim.in"
+            c2nimOutput = cacheDir / "c2nim.out"
+          writeFile(c2nimInput, node["value"].str)
+          let c2nim = gorgeEx(cmdPrefix & c2nimBin & " --out:" & c2nimOutput & " " & c2nimInput)
+          if c2nim.exitCode == 0:
+            let
+              c2nimResultRaw = readFile(c2nimOutput)
+              c2nimResultClean = c2nimResultRaw.replace("__", "_")
+            try:
+              let c2nimResult = parseStmt(c2nimResultClean)
+              if c2nimResult.kind == nnkStmtList and c2nimResult.len > 0:
+                case c2nimResult[0].kind:
+                of nnkConstSection:
+                  if c2NimResult[0][0][0][1].kind != nnkIdent:
+                    warning "Didn't find identifier in expected location in c2nim const output"
+                    continue
+                  c2NimResult[0][0][0][1] = newIdentNode(state.sanitizeName(c2NimResult[0][0][0][1].strVal, Const))
+                  let ident = c2NimResult[0][0][0][1]
+                  state.addExtraType(node["file"].str, state.declGuard(ident, c2nimResult))
+                of nnkTemplateDef:
+                  if c2NimResult[0][0][1].kind != nnkIdent:
+                    warning "Didn't find identifier in expected location in c2nim template output"
+                    continue
+                  c2NimResult[0][0][1] = newIdentNode(state.sanitizeName(c2NimResult[0][0][1].strVal, Template))
+                  let ident = c2NimResult[0][0][1]
+                  state.addExtraType(node["file"].str, state.declGuard(ident, c2nimResult))
+                else:
+                  warning "Unknown node kind returned from c2nim: " & $c2nimResult[0].kind
+            except:
+              warning "Failed to parse c2nim output: " & c2nimResultRaw
+          else:
+            warning "c2nim failed to parse macro: " & node["value"].str
         else:
           warning "Anonymous global: " & $node
 
