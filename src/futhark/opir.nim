@@ -246,7 +246,7 @@ proc genStructDecl(struct: CXCursor): JsonNode =
     of CXCursor_FieldDecl, CXCursor_StructDecl, CXCursor_UnionDecl, CXCursor_EnumDecl, CXCursor_TypeRef:
       case field.getCursorType.kind:
       of CXType_Enum:
-        mainObj[]["fields"].add %*{"type": genEnumDecl(field)}
+        mainObj[]["fields"].add %*{"type": field.toNimType, "name": field.getName}
       of CXType_Elaborated, CXType_Record:
         if mainObj[]["fields"].elems.len != 0 and
             not mainObj[]["fields"].elems[^1].hasKey("name") and
