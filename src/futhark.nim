@@ -265,7 +265,11 @@ proc findAlias(kind: JsonNode): string =
   case kind["kind"].str:
   of "alias": kind["value"].str
   of "base", "special", "vector": ""
-  of "pointer", "atomic": findAlias(kind["base"])
+  of "pointer", "atomic":
+    if kind.hasKey("base"):
+      findAlias(kind["base"])
+    else:
+      ""
   of "array": (if kind["value"].kind == JNull: "" else: findAlias(kind["value"]))
   of "struct", "union", "enum": (if kind.hasKey("name"): kind["name"].str else: "")
   of "proc": (if kind.hasKey("name"): kind["name"].str else: "")
@@ -302,11 +306,12 @@ proc addUsings(used: var OrderedSet[string], node: JsonNode) =
       used.incl alias
     used.addUsings(node["type"])
   of "pointer", "atomic":
-    let alias = node["base"].findAlias
-    if alias.len != 0:
-      used.incl alias
-    elif node["base"]["kind"].str == "proc":
-      used.addUsings(node["base"])
+    if node.hasKey("base"):
+      let alias = node["base"].findAlias
+      if alias.len != 0:
+        used.incl alias
+      elif node["base"]["kind"].str == "proc":
+        used.addUsings(node["base"])
   of "alias":
     used.incl node.findAlias
   of "enum", "base", "special", "vector": discard
@@ -336,15 +341,19 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
     of "base": json["value"].str.ident
     of "pointer":
       var node =
-        case json["base"]["kind"].str:
-        of "alias", "proc", "base":
-          var node = json["base"].toNimType(state)
-          if node.strCmp "void":
-            node = "pointer".ident
-          node
+        if json.hasKey("base"):
+          case json["base"]["kind"].str:
+          of "alias", "proc", "base":
+            var node = json["base"].toNimType(state)
+            if node.strCmp "void":
+              node = "pointer".ident
+            node
+          else:
+            "pointer".ident
         else:
           "pointer".ident
-      for i in 0..<json["depth"].num - (if node.strCmp("pointer") or json["base"]["kind"].str == "proc": 1 else: 0):
+      let baseIsProc = json.hasKey("base") and json["base"]["kind"].str == "proc"
+      for i in 0..<json["depth"].num - (if node.strCmp("pointer") or baseIsProc: 1 else: 0):
         node = nnkPtrTy.newTree(node)
       node
     of "proc":
@@ -353,8 +362,9 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         nnkPragma.newTree(json["callingConvention"].str.ident))
       if json["variadic"].bval and (json["proto"].bval or preAnsiFuncDecl):
         procTy[^1].add "varargs".ident
-      if json["return"]["kind"].str == "pointer" and json["return"]["base"]["kind"].str == "alias":
-        state.addOpaque json["return"]["base"]["value"].str
+      if json["return"]["kind"].str == "pointer":
+        if json["return"].hasKey("base") and json["return"]["base"]["kind"].str == "alias":
+          state.addOpaque json["return"]["base"]["value"].str
       var
         i = 0
         usedFields: HashSet[string]
@@ -363,8 +373,9 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
           aname = if arg.hasKey("name"): usedFields.sanitizeName(arg["name"].str, Argument, state.renameCallback, "", state.overloading) else: "a" & $i
           atype = (if arg.hasKey("type"): arg["type"] else: arg).toNimType(state)
         if arg.hasKey("type"):
-          if arg["type"]["kind"].str == "pointer" and arg["type"]["base"]["kind"].str == "alias":
-            state.addOpaque arg["type"]["base"]["value"].str
+          if arg["type"]["kind"].str == "pointer":
+            if arg["type"].hasKey("base") and arg["type"]["base"]["kind"].str == "alias":
+              state.addOpaque arg["type"]["base"]["value"].str
         procTy[0].add nnkIdentDefs.newTree(aname.ident, atype, newEmptyNode())
         inc i
       procTy
@@ -389,7 +400,10 @@ proc toNimType(json: JsonNode, state: var State): NimNode =
         newIdentDefs("high".ident, (if json["value"].str == "uint128": "uint64" else: "int64").ident))
     of "atomic":
       state.imports.mgetOrPut(state.currentFile, initHashSet[string]()).incl "std/atomics"
-      nnkBracketExpr.newTree("Atomic".ident, json["base"].toNimType(state))
+      if json.hasKey("base"):
+        nnkBracketExpr.newTree("Atomic".ident, json["base"].toNimType(state))
+      else:
+        "pointer".ident
     else:
       warning "Unknown: " & $json
       "pointer".ident
@@ -505,7 +519,7 @@ proc createStruct(origName, saneName: string, node: JsonNode, state: var State, 
     if state.retypes.hasKey(normalizedName) and state.retypes[normalizedName].hasKey(fname):
       newType[^1][^1].add newIdentDefs(fident, state.retypes[normalizedName][fname])
     else:
-      if fieldType["kind"].str == "pointer" and fieldType["base"]["kind"].str == "alias":
+      if fieldType["kind"].str == "pointer" and fieldType.hasKey("base") and fieldType["base"]["kind"].str == "alias":
         state.addOpaque fieldType["base"]["value"].str
       if fieldType["kind"].str == "enum":
         let enumName = saneName & "_" & fname & "_t"
