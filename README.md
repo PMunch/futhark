@@ -490,7 +490,7 @@ full projects that add nice-to-have features on top of an existing C library. If
 you have a project of your own you want to show off, please make a PR!
 
 - [MAPM](https://github.com/PMunch/mapm-nim): Fully wrapped with destructors and a nice Nim interface
-- [libfuse](https://github.com/PMunch/libfuse-nim/blob/master/libfuse.nim): Quick and dirty wrapper for libfuse to play around with filesystems
+- [libfuse](https://github.com/PMunch/libfuse-nim/blob/master/src/libfuse.nim): Quick and dirty wrapper for libfuse to play around with filesystems
 - [VapourSynth](https://github.com/mantielero/vs.nim): Uses Futhark to create the initial wrapper, then builds a nice Nim library on top
 - [python_nim_libmem](https://github.com/Hypnootika/python_nim_libmem): Futhark and helper scripts to generate Nim and Python bindings for "Libmem"
 - [box2d.nim](https://github.com/jon-edward/box2d.nim): Nim bindings for Erin Catto's Box2D physics engine. 
