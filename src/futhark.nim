@@ -657,8 +657,6 @@ proc getMacroFields(state: var State, typeName: string): seq[string] =
   ## Resolves the Nim field names of the struct type that a compound literal
   ## macro initializes, following typedef aliases. Returns an empty sequence
   ## if the type can't be resolved to a struct/union with named fields.
-  
-  debugEcho "getMacroFields(", typeName, ")"
   var
     seen = initHashSet[string]()
     current = typeName
@@ -674,16 +672,20 @@ proc getMacroFields(state: var State, typeName: string): seq[string] =
         anons = 0
       for field in node["fields"]:
         if field.hasKey("bitsize") and field["bitsize"].num == 0: continue
+        let (saneFieldName, fname) =
+          if field.hasKey("name") and field["name"].str.len != 0:
+            let saneFieldName = usedFieldNames.sanitizeName(field["name"].str, Field, state.renameCallback, partof = current, state.overloading)
+            let fname =
+              if state.fieldRenames.hasKey(current):
+                state.fieldRenames[current].getOrDefault(field["name"].str, saneFieldName)
+              else: saneFieldName
+            (saneFieldName, fname)
+          else:
+            let name = usedFieldNames.sanitizeName("anon" & $anons, Field, state.renameCallback, partof = current, state.overloading)
+            inc anons
+            (name, name)
         if field.hasKey("name") and field["name"].str.len != 0:
-          let saneName = usedFieldNames.sanitizeName(field["name"].str, Field, state.renameCallback, partof = current, state.overloading)
-          let fname =
-            if state.fieldRenames.hasKey(current):
-              state.fieldRenames[current].getOrDefault(field["name"].str, saneName)
-            else: saneName
           result.add fname
-        else:
-          discard usedFieldNames.sanitizeName("anon" & $anons, Field, state.renameCallback, partof = current, state.overloading)
-          inc anons
       return
     of "typedef":
       if node["type"]["kind"].str == "alias":
