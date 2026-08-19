@@ -444,10 +444,13 @@ can be spent on quality Nim translation.
 # Sounds great, what's the catch?
 Futhark is currently in an beta state, it works really well but you might run
 into occasional bugs or hickups. It also doesn't support C++ at the moment, and
-it doesn't understand things like function-style macros. It might also mess up
-on strange C things which haven't been encountered yet, although this is more
-and more rare as people use it. All of these shortcomings are things I hope to
-get fixed up over time.
+it doesn't understand things like function-style macros. Simple object-like
+macros (integer, float and string literals, identifier aliases, and compound
+literals such as raylib's `#define LIGHTGRAY CLITERAL(Color){ 200, 200, 200, 255 }`)
+are handled, with compound literals being generated as Nim templates. It might
+also mess up on strange C things which haven't been encountered yet, although
+this is more and more rare as people use it. All of these shortcomings are
+things I hope to get fixed up over time.
 
 # Installation
 To install Futhark you first need to have clang installed. Installing clang on
@@ -496,5 +499,6 @@ you have a project of your own you want to show off, please make a PR!
 - [box2d.nim](https://github.com/jon-edward/box2d.nim): Nim bindings for Erin Catto's Box2D physics engine. 
 
 ## TODO
-- Proper handling of C macros (inherently hard because C macros are typeless)
+- Proper handling of function-style C macros (inherently hard because C macros
+  are typeless). Object-like macros, including compound literals, are handled.
 - Find way to not require C compiler include paths
