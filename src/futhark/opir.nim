@@ -365,6 +365,43 @@ proc genProcDecl(funcDecl: CXCursor): JsonNode =
   let funcDeclType = funcDecl.getCursorType
   genProcDecl(funcDeclType, some(funcDecl))
 
+proc parseNumericToken(token: string): Option[JsonNode] =
+  ## Parse a single C numeric literal (e.g. `200`, `0xFF`, `3.14f`, `123ULL`)
+  ## into a JSON number node. Returns `none` if the token isn't a number.
+  let tok = token.strip
+  if tok.len == 0: return none(JsonNode)
+  var t = tok.replace("'", "")
+  var
+    floatSuffix = false
+    long = false
+    longlong = false
+  var endIdx = t.high
+  while endIdx >= 0 and t[endIdx] in {'u', 'U', 'l', 'L', 'f', 'F'}:
+    case t[endIdx]:
+    of 'u', 'U': discard
+    of 'f', 'F': floatSuffix = true
+    of 'l', 'L':
+      if long: longlong = true else: long = true
+    else: discard
+    dec endIdx
+  let core = t[0..endIdx]
+  try:
+    if floatSuffix or core.contains('.'):
+      result = some(%parseFloat(core))
+    elif core.len > 2 and core[0] == '0' and core[1] in {'x', 'X'}:
+      result = some(%parseHexInt(core[2..^1]))
+    elif core.len > 2 and core[0] == '0' and core[1] in {'b', 'B'}:
+      result = some(%parseBinInt(core[2..^1]))
+    elif core.len > 1 and core[0] == '0' and core.allCharsInSet({'0'..'9'}):
+      result = some(%parseOctInt(core[1..^1]))
+    else:
+      result = some(%parseInt(core))
+  except ValueError:
+    try:
+      result = some(%parseBiggestUInt(core))
+    except ValueError:
+      result = none(JsonNode)
+
 var fileCache: Table[string, string] # TODO: Is there some way to get the macro body so we don't have to do this?
 proc genMacroDecl(macroDef: CXCursor): JsonNode =
   let name = macroDef.getName
@@ -464,6 +501,80 @@ proc genMacroDecl(macroDef: CXCursor): JsonNode =
             parseReturn(Float, def.replace("'", "")[0..^2], kind)
           else:
             parseReturn(Float, def.replace("'", ""), kind)
+
+        # Compound literal parsing, e.g. raylib's named colors:
+        #   #define LIGHTGRAY CLITERAL(Color){ 200, 200, 200, 255 }
+        # or the plain C99 form:
+        #   #define FOO (Color){ 245, 245, 245, 255 }
+        let braceOpen = def.find('{')
+        if braceOpen > 0:
+          var lastParen = -1
+          for i in countdown(braceOpen - 1, 0):
+            if def[i] == ')':
+              lastParen = i
+              break
+          if lastParen != -1:
+            var parenDepth = 0
+            var typeOpen = -1
+            for i in countdown(lastParen, 0):
+              case def[i]:
+              of ')': inc parenDepth
+              of '(':
+                dec parenDepth
+                if parenDepth == 0:
+                  typeOpen = i
+                  break
+              else: discard
+            if typeOpen != -1:
+              # Normalize `struct Foo` / `union Foo` to the names futhark
+              # uses for those entities (e.g. `struct_Foo`)
+              let typeName = block:
+                let rawType = def[typeOpen+1..<lastParen].strip
+                if rawType.len > 0:
+                  let parts = rawType.splitWhitespace
+                  if parts.len == 2 and parts[0] in ["struct", "union"]:
+                    parts[0] & "_" & parts[1]
+                  else:
+                    rawType
+                else: rawType
+              if typeName.len > 0 and typeName[0] notin {'0'..'9'} and
+                  typeName.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}):
+                var braceDepth = 0
+                var braceClose = -1
+                for i in braceOpen..<def.len:
+                  case def[i]:
+                  of '{': inc braceDepth
+                  of '}':
+                    dec braceDepth
+                    if braceDepth == 0:
+                      braceClose = i
+                      break
+                  else: discard
+                if braceClose != -1 and def[braceClose+1..^1].strip.len == 0:
+                  let vals = def[braceOpen+1..<braceClose]
+                  var values = newJArray()
+                  var valDepth = 0
+                  var start = 0
+                  var ok = true
+                  for i in 0..<vals.len:
+                    case vals[i]:
+                    of '(', '[', '{': inc valDepth
+                    of ')', ']', '}': dec valDepth
+                    of ',':
+                      if valDepth == 0:
+                        let value = parseNumericToken(vals[start..<i])
+                        if value.isNone:
+                          ok = false
+                          break
+                        values.add value.get
+                        start = i + 1
+                    else: discard
+                  if ok:
+                    let last = parseNumericToken(vals[start..^1])
+                    if last.isSome:
+                      values.add last.get
+                      return %*{"kind": "macro", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": {"kind": "alias", "value": typeName}, "value": values}
+
         # TODO; Look at already defined stuff and ensure this is not a type
         if def.allCharsInSet({'a'..'z', 'A'..'Z', '0'..'9', '_'}) and def[0] notin '0'..'9':
           return %*{"kind": "const", "file": fname, "position": {"column": column, "line": line}, "name": name, "type": {"kind": "alias", "value": def}}

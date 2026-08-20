@@ -156,6 +156,7 @@ type
     Field = "field"
     Variable = "var"
     Const = "const"
+    Macro = "macro"
   PragmasCallback = proc(name: string, kind: SymbolKind, pragmas: var seq[NimNode])
   RenameCallback = proc(name: string, kind: SymbolKind, partof: string, overloading: var bool): string
   OpirCallbacks = seq[proc(opirOutput: JsonNode): JsonNode]
@@ -317,6 +318,8 @@ proc addUsings(used: var OrderedSet[string], node: JsonNode) =
   of "const":
     if node["type"]["kind"].str != "unknown":
       used.addUsings(node["type"])
+  of "macro":
+    used.addUsings(node["type"])
   else: error("Unknown node in addUsings: " & $node)
 
 proc addKnown(state: var State, known: string) =
@@ -649,6 +652,83 @@ proc createConst(origName: string, node: JsonNode, state: var State, comment: st
         `newConstValueStmt`
       else:
         `newLetValueStmt`)
+
+proc getMacroFields(state: var State, typeName: string): seq[string] =
+  ## Resolves the Nim field names of the struct type that a compound literal
+  ## macro initializes, following typedef aliases. Returns an empty sequence
+  ## if the type can't be resolved to a struct/union with named fields.
+  var
+    seen = initHashSet[string]()
+    current = typeName
+  while state.entities.hasKey(current) and current notin seen:
+    seen.incl current
+    let node = state.entities[current]
+    case node["kind"].str:
+    of "struct", "union":
+      # Replicate the field naming used by `createStruct` so the generated
+      # object constructor matches the actual Nim object fields.
+      var
+        usedFieldNames = initHashSet[string]()
+        anons = 0
+      for field in node["fields"]:
+        if field.hasKey("bitsize") and field["bitsize"].num == 0: continue
+        let (saneFieldName, fname) =
+          if field.hasKey("name") and field["name"].str.len != 0:
+            let saneFieldName = usedFieldNames.sanitizeName(field["name"].str, Field, state.renameCallback, partof = current, state.overloading)
+            let fname =
+              if state.fieldRenames.hasKey(current):
+                state.fieldRenames[current].getOrDefault(field["name"].str, saneFieldName)
+              else: saneFieldName
+            (saneFieldName, fname)
+          else:
+            let name = usedFieldNames.sanitizeName("anon" & $anons, Field, state.renameCallback, partof = current, state.overloading)
+            inc anons
+            (name, name)
+        if field.hasKey("name") and field["name"].str.len != 0:
+          result.add fname
+      return
+    of "typedef":
+      if node["type"]["kind"].str == "alias":
+        current = node["type"]["value"].str
+      else:
+        return
+    else:
+      return
+
+proc createMacro(origName: string, node: JsonNode, state: var State, comment: string) =
+  ## Generate a Nim template from a C macro that expands to a compound
+  ## literal, e.g. `#define LIGHTGRAY CLITERAL(Color){ 200, 200, 200, 255 }`.
+  ## C macros are re-evaluated at every use site, so a template is the closest
+  ## Nim equivalent; every use expands to a fresh object literal.
+  let
+    nameIdent = state.renamed[origName].ident
+    typeName = node["type"]["value"].str
+    typeIdent = state.renamed.getOrDefault(typeName, typeName).ident
+    fields = state.getMacroFields(typeName)
+  if fields.len == 0:
+    warning "Unable to resolve fields of type " & typeName & " for macro " & origName & ", not generating a template for it"
+    return
+  let values = node["value"]
+  if values.len != fields.len:
+    warning "Macro " & origName & " has " & $values.len & " values, but " & typeName & " has " & $fields.len & " fields, not generating a template for it"
+    return
+  var constructor = nnkObjConstr.newTree(typeIdent)
+  for i in 0..<fields.len:
+    let value = case values[i].kind:
+      of JInt:
+        let intNode = newNimNode(nnkIntLit)
+        intNode.intVal = values[i].num
+        intNode
+      of JFloat:
+        let floatNode = newNimNode(nnkFloatLit)
+        floatNode.floatVal = values[i].fnum
+        floatNode
+      of JString: newLit(values[i].str)
+      else: newLit(values[i].num)
+    constructor.add nnkExprColonExpr.newTree(fields[i].ident, value)
+  state.addProc node["file"].str, state.declGuard(nameIdent, quote do:
+    template `nameIdent`*(): `typeIdent` =
+      `constructor`)
 
 proc createTypedef(origName: string, node: JsonNode, state: var State, comment: string) =
   var newType = parseStmt("type dummy = dummy ## " & comment)[0][0]
@@ -1006,7 +1086,7 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
   for name in state.used:
     if state.entities.hasKey(name):
       let saneName = if state.renamed.hasKey(name): state.renamed[name] else: state.sanitizeName(state.entities[name])
-      if state.entities[name]["kind"].str notin ["proc", "var", "const"]:
+      if state.entities[name]["kind"].str notin ["proc", "var", "const", "macro"]:
         state.typeDefMap[name] = when nodeclguards: newIdentNode(saneName) else: genSym(nskType, saneName)
         state.typeNameMap[name] = when nodeclguards: newIdentNode(saneName) else:  genSym(nskType, saneName)
 
@@ -1046,6 +1126,8 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
         createVar(elem, node, state)
       of "const":
         createConst(elem, node, state, comment)
+      of "macro":
+        createMacro(elem, node, state, comment)
       else:
         warning "Unknown node kind: " & $node["kind"]
       #else:
