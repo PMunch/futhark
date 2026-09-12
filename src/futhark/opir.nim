@@ -64,9 +64,7 @@ proc toNimType(ct: CXType): JsonNode =
     ct.getCanonicalType.toNimType
   of CXType_Void: %*{"kind": "base", "value": "void"}
   of CXType_Bool: %*{"kind": "base", "value": "bool"}
-  of CXType_Char_U:
-    when defined(linux) and defined(arm64): %*{"kind": "base", "value": "cschar"}
-    else: %*{"kind": "base", "value": "uint8"}
+  of CXType_Char_U: %*{"kind": "base", "value": "cchar"}
   of CXType_UChar: %*{"kind": "base", "value": "uint8"} # cuchar is deprecated, use uint8 instead
   of CXType_Char16: %*{"kind": "base", "value": "int16"}
   of CXType_Char32: %*{"kind": "base", "value": "int32"}
@@ -96,7 +94,7 @@ proc toNimType(ct: CXType): JsonNode =
           info.baseType.getTypeDeclaration.getTypedefDeclUnderlyingType.toNimType
         else:
           baseType
-    if underlyingType["kind"].str == "base" and underlyingType["value"].str == "cschar": # in {CXType_Char_S, CXType_SChar}:
+    if underlyingType["kind"].str == "base" and underlyingType["value"].str in ["cschar", "cchar"]: # in {CXType_Char_S, CXType_SChar, CXType_Char_U}:
       if info.depth == 1:
         %*{"kind": "base", "value": "cstring"}
       else:
