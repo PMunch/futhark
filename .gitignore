@@ -1,0 +1,3 @@
+# Nim build outputs
+nimcache/
+futhark/opir
