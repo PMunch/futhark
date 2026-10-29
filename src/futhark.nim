@@ -833,6 +833,13 @@ proc getCommonPrefix(strs: openArray[string]): string =
         break
   strs[0][0..lastSlash]
 
+proc getSymDigest(x: NimNode): string =
+  symBodyHash(
+    when (NimMajor, NimMinor) >= (2, 4):
+      x
+    else:
+      x[0])
+
 macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, importDirs, ignores: static[openArray[string]], renames, retypes: static[openArray[FromTo]], renameCallback: static[RenameCallback], opirCallbacks: static[OpirCallbacks], pragmasCallback: static[PragmasCallback], forwards: static[openArray[Forward]]): untyped =
   ## Generate code from C header file. A string, `defs`, containing a header
   ## file with `#include` statements, preprocessor defines and rules, etc. to
@@ -888,10 +895,10 @@ macro importcImpl*(defs, outputPath: static[string], compilerArguments, files, i
     fullHash = !$(hash(nodeclguards) !& hash(noopaquetypes) !& hash(exportall) !&
       hash(generateInline) !& hash(preAnsiFuncDecl) !& hash(renames) !&
       hash(retypes) !& opirHash !&
-      hash(if renameCallback.isNil: "" else: renameCallbackSym[0].symBodyHash) !&
-      hash(if pragmasCallback.isNil: "" else: pragmasCallbackSym[0].symBodyHash) !&
+      hash(if renameCallback.isNil: "" else: renameCallbackSym.getSymDigest) !&
+      hash(if pragmasCallback.isNil: "" else: pragmasCallbackSym.getSymDigest) !&
       (if forwards.len != 0: forwards.mapIt(hash(it)).foldl(a !& b) else: hash("")) !&
-      (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it[0].symBodyHash)).foldl(a !& b) else: hash("")))
+      (if opirCallbackSyms.len != 0: opirCallbackSyms.mapIt(hash(it.getSymDigest)).foldl(a !& b) else: hash("")))
     futharkCache = if outputPath.len == 0: cacheDir / "futhark_" & fullHash.toHex & ".nim"
       elif dirExists(outputPath): outputPath / "futhark_" & fullHash.toHex & ".nim"
       else: outputPath
