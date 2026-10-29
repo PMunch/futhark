@@ -14,4 +14,4 @@ bin           = @["futhark/opir"]
 requires "nim >= 1.4.8"
 requires "termstyle"
 requires "macroutils"
-requires "https://github.com/PMunch/nimbleutils >= 0.3.3"
+requires "https://github.com/PMunch/nimbleutils >= 0.3.4"
